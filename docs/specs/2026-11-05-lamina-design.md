@@ -29,8 +29,11 @@ Goals
   on demand and cached in the project.
 - Fast and light: a dense 4-layer board renders at 60 fps, memory stays
   low, the PC does not freeze.
-- First real output: the MeraTag collar board (70 x 40 mm, 4 layers,
-  about 15 parts) ordered from JLCPCB with assembly.
+- First real output: a reference board of our own (a small USB-C
+  microcontroller board from LCSC parts) and a test coupon, both exported
+  for JLCPCB with assembly files.
+- Every part shows its real 3D model. A grey box is only a transient
+  state while a model is missing or failed to load, never the end state.
 
 Non-goals (not in version one)
 
@@ -168,9 +171,13 @@ are imports and out of scope for version one, see the non-goals.
 
 No library ships with Lamina. Sources, in order of preference:
 
-1. LCSC / JLCPCB public API: part data, stock, price, package name, and
-   the EasyEDA footprint and 3D model JSON when present. This matters
-   because JLCPCB assembly only stocks LCSC parts.
+1. LCSC / JLCPCB / EasyEDA: part search, stock, price, package name, and
+   the EasyEDA footprint and 3D model (OBJ, and STEP when offered),
+   imported and converted into Lamina's own footprint format and cached
+   in the project. There is no official API; the endpoints are
+   unofficial, so each sits behind a source trait and failures degrade
+   gracefully. This matters because JLCPCB assembly only stocks LCSC
+   parts.
 2. Manufacturer: STEP model and datasheet land pattern. The agent reads
    the datasheet and calls `footprint_from_pads` with the numbers; the
    footprint stores the datasheet name and page.
@@ -185,19 +192,17 @@ No library ships with Lamina. Sources, in order of preference:
 Not used: SnapEDA, Ultra Librarian, SamacSys (redistribution forbidden),
 KiCad libraries.
 
-3D models: STEP is the stored source. On first use it is tessellated
-with the `truck` crate into a binary mesh cached beside it. The viewer
-and the 3D renderer load meshes, never STEP. A part with no model gets a
-grey box from its courtyard and the package height.
+3D models: STEP or OBJ is the stored source. On first use it is
+tessellated into a binary mesh cached beside it. The viewer and the 3D
+renderer load meshes, never STEP. While a part has no model yet, it is
+drawn as a grey box from its courtyard and the package height.
 
-`truck` reads a subset of STEP, and vendor files (multi-body
-assemblies, offset and toroidal surfaces) will sometimes fail. STEP
-loading is best effort in version one: a failure is reported with the
-reason, the part falls back to the grey box, and the fab outputs are
-unaffected. Mesh formats that need no B-rep kernel (glTF, OBJ, 3MF) are
-accepted directly when a manufacturer offers them. Extending `truck`'s
-STEP coverage is allowed if a MeraTag part needs it; linking
-OpenCASCADE or any C++ kernel is not, see Open.
+Real models are required. Lamina has its own STEP reader and
+tessellator in Rust (AP203/AP214/AP242 B-rep subset, assemblies,
+colours), tested against a corpus of real vendor files that must all
+load. A face that cannot be tessellated is reported and skipped, never
+failing the whole model. Mesh formats that need no B-rep kernel (OBJ
+from EasyEDA, glTF, 3MF) are loaded directly. No C++ kernel.
 
 ### 5.5 Geometry and DRC
 
@@ -256,23 +261,27 @@ in JLCPCB's online Gerber viewer, then the coupon board itself.
 3. Raster renderer and `render` tool. From here the agent can see.
 4. Placement tools, DRC, connectivity.
 5. Hand routing tools, zones, keep-outs, grid router.
-6. Exporters. Order a test coupon board from JLCPCB to validate output.
+6. Exporters. Validate output with a test coupon board.
 7. Viewer: 2D with hot reload, then 3D.
-8. MeraTag collar board end to end, ordered with assembly.
+8. Test coupon and reference board end to end, exported for JLCPCB.
 
 MCP wraps each core operation as soon as it exists, so the agent can use
 Lamina to build Lamina's own test boards from step 3 onward.
 
 ### 5.10 First target
 
-MeraTag collar: 70 x 40 mm, 1.6 mm FR-4, 4 layers proposed, about 15
-parts including a 47-pad LGA radio module with antenna keep-outs, an
-LGA-14 IMU, 0402 to 1206 passives, a 2 x 5 through-hole header, a
-soldered AA cell on plated slots and NPTH cable-tie slots, test pads and
-fiducials. Two parts are not at LCSC and come from manufacturer
-drawings. Spec: `Desktop\collar_tag\hardware\PCB-SPEC.md`. Everything in
-that spec must be expressible in Lamina's model: slots, NPTH, keep-outs
-on all layers, per-net widths, mask and paste overrides, fiducials.
+Lamina is its own project, independent of any product board. The first
+targets are:
+
+- A test coupon: trace widths, clearances, via sizes, plated and
+  non-plated holes, slots, every pad shape.
+- A reference board: a small USB-C microcontroller board (ESP32-C3 or
+  RP2040 class), 2 or 4 layers, JLCPCB basic parts where possible, built
+  entirely by an agent through MCP.
+
+The model must still express everything a real product board needs:
+slots, NPTH, keep-outs on any layer set, per-net widths, mask and paste
+overrides, fiducials, modules with antenna keep-outs.
 
 ## 6. Left to the builder
 
@@ -284,22 +293,14 @@ on all layers, per-net widths, mask and paste overrides, fiducials.
 - Test strategy, but every geometry and export function needs tests, and
   Gerber output needs a golden-file comparison.
 
-## 7. Open
+## 7. Decided after review
 
-- Part data source. There is no official LCSC or JLCPCB parts API. The
-  endpoints in common use (EasyEDA component and 3D model endpoints,
-  JLCPCB parts search) are undocumented and unauthenticated, and the
-  EasyEDA footprints and models they return are someone else's library
-  data, the same objection that excludes SnapEDA. Two options:
-  (a) use the unofficial endpoints for stock, price and package name
-  only, and build every footprint ourselves from IPC-7351 or the
-  datasheet; (b) also fetch and cache EasyEDA footprints and models into
-  the project. Awaiting the user's decision. Recommendation: (a).
-- 3D models in the final MeraTag deliverable: is a grey box acceptable
-  for parts whose vendor STEP `truck` cannot read, or must version one
-  be able to show every part, which would mean either extending `truck`
-  or allowing a C++ kernel (OpenCASCADE) as a dependency. Awaiting the
-  user's decision. Recommendation: grey box acceptable, no C++ kernel.
-- Licence for the repository. Proposed: MIT or Apache-2.0, as the user
-  prefers. Not decided.
+- Part data: LCSC/JLCPCB/EasyEDA including footprint and model import
+  (5.4).
+- 3D: real models required, own STEP reader (5.4).
+- Licence: MIT OR Apache-2.0.
+- Lamina is independent of the MeraTag project (5.10).
+
+## 8. Open
+
 - Whether to publish on crates.io at all.

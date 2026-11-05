@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.90"
+
+[workspace.dependencies]
+lamina-model = { path = "crates/lamina-model" }
+lamina-geom = { path = "crates/lamina-geom" }
+lamina-footprint = { path = "crates/lamina-footprint" }
+lamina-parts = { path = "crates/lamina-parts" }
+lamina-step = { path = "crates/lamina-step" }
+lamina-drc = { path = "crates/lamina-drc" }
+lamina-route = { path = "crates/lamina-route" }
+lamina-export = { path = "crates/lamina-export" }
+lamina-scene = { path = "crates/lamina-scene" }
+lamina-render = { path = "crates/lamina-render" }
+lamina-core = { path = "crates/lamina-core" }
+
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+schemars = "1.2.3"
+thiserror = "2.0.21"
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+tokio = { version = "1.54.1", features = ["macros", "rt", "io-std"] }
+rmcp = { version = "3.8.0", features = ["server", "transport-io"] }
+sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
+tempfile = "3.27.0"
+proptest = "1.12.0"
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.release]
+lto = "thin"

@@ -1,0 +1,12 @@
+[package]
+name = "lamina-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[[bin]]
+name = "lamina"
+path = "src/main.rs"
