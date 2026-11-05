@@ -246,6 +246,10 @@ pub struct Part {
     pub dnp: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fields: BTreeMap<String, String>,
+    /// Block instance this part belongs to, for example `servo1`. Parts of
+    /// one group move together and can take another group's layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 impl Part {
@@ -259,7 +263,21 @@ impl Part {
             description: None,
             dnp: false,
             fields: BTreeMap::new(),
+            group: None,
         }
+    }
+}
+
+impl PartsFile {
+    /// Group names with their parts, sorted.
+    pub fn groups(&self) -> BTreeMap<String, Vec<String>> {
+        let mut m: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (r, p) in &self.parts {
+            if let Some(g) = &p.group {
+                m.entry(g.clone()).or_default().push(r.clone());
+            }
+        }
+        m
     }
 }
 

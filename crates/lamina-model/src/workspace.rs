@@ -49,7 +49,8 @@ pub struct Workspace {
 impl Workspace {
     /// The workspace that contains `dir`, searching upwards.
     pub fn find(dir: &Path) -> Option<Workspace> {
-        let mut cur = Some(dir.to_path_buf());
+        // Absolute first: a relative `.` has no parents to walk up to.
+        let mut cur = Some(std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf()));
         for _ in 0..12 {
             let d = cur?;
             let f = d.join(WORKSPACE_FILE);
@@ -111,8 +112,10 @@ impl Workspace {
 
     /// Register a board folder (relative path kept forward-slashed).
     pub fn add_board(&mut self, dir: &Path) -> Result<()> {
-        let rel = dir
-            .strip_prefix(&self.root)
+        let abs = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+        let root = abs(&self.root);
+        let rel = abs(dir)
+            .strip_prefix(&root)
             .map_err(|_| {
                 Error::Invalid(format!(
                     "{} is outside the workspace {}",
@@ -193,6 +196,20 @@ pub fn footprint_dirs(board: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// Folders holding saved block layouts: the board's own `layouts/` first,
+/// then `layouts/` in each workspace library. Missing folders included, so
+/// the first entry of a workspace library is where new layouts go.
+pub fn layout_dirs(board: &Path) -> Vec<PathBuf> {
+    let mut out = vec![board.join(LAYOUT_DIR)];
+    if let Some(ws) = Workspace::find(board) {
+        out.extend(ws.lib_dirs().into_iter().map(|l| l.join(LAYOUT_DIR)));
+    }
+    out
+}
+
+/// Folder name for saved block layouts.
+pub const LAYOUT_DIR: &str = "layouts";
+
 /// Resolve a model file for a board: its own cache first, then the
 /// workspace libraries.
 pub fn find_model(board: &Path, rel: &str) -> Option<PathBuf> {
@@ -233,5 +250,31 @@ mod tests {
         );
         assert!(Workspace::find(t.path()).is_none());
         assert!(ws.add_board(t.path()).is_err());
+    }
+
+    #[test]
+    fn find_from_a_relative_path() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("ws");
+        let board = root.join("boards/a");
+        std::fs::create_dir_all(&board).unwrap();
+        Workspace::create(&root, "demo").unwrap();
+        // `.` inside the board, written relative to the current directory.
+        let cwd = std::env::current_dir().unwrap();
+        let rel: PathBuf = cwd
+            .components()
+            .skip(1)
+            .map(|_| Path::new(".."))
+            .collect::<PathBuf>()
+            .join(
+                board
+                    .strip_prefix(board.ancestors().last().unwrap())
+                    .unwrap(),
+            )
+            .join(".");
+        let mut ws = Workspace::find(&rel).expect("found through a relative path");
+        assert_eq!(ws.lib_dirs().len(), 1);
+        ws.add_board(&rel).unwrap();
+        assert_eq!(ws.file.boards, vec!["boards/a".to_string()]);
     }
 }
