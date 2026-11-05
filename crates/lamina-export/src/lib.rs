@@ -4,6 +4,7 @@ pub mod fab_import;
 pub mod gerber;
 pub mod gerber_in;
 pub mod reader;
+pub mod step_out;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;

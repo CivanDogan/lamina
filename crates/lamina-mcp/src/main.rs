@@ -55,6 +55,18 @@ enum Cmd {
     },
     /// Import Gerber and drill files (folder or zip) into a project as artwork.
     ImportGerbers { path: PathBuf, dir: PathBuf },
+    /// Write the assembled board as a STEP file.
+    ExportStep {
+        dir: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Drill vias through the board too.
+        #[arg(long)]
+        vias: bool,
+        /// Leave the part models out.
+        #[arg(long)]
+        board_only: bool,
+    },
     /// Write a Specctra DSN for an external autorouter.
     ExportDsn {
         dir: PathBuf,
@@ -138,6 +150,21 @@ fn main() -> anyhow::Result<()> {
                 models: !no_models,
                 replace: false,
                 strict: false,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
+            Ok(())
+        }
+        Cmd::ExportStep {
+            dir,
+            out,
+            vias,
+            board_only,
+        } => {
+            let p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
+            let r = p.export_step(lamina_core::ExportStep {
+                path: out.map(|o| o.to_string_lossy().to_string()),
+                vias,
+                board_only,
             })?;
             println!("{}", serde_json::to_string_pretty(&r)?);
             Ok(())

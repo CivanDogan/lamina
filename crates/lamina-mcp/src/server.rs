@@ -258,6 +258,18 @@ impl Lamina {
         self.with(|proj| proj.import_gerbers(p))
     }
 
+    /// Write the assembled board as a STEP file (AP214) for mechanical CAD:
+    /// the board solid with its outline, cut-outs and drilled holes, and
+    /// every part's 3D model placed. Part STEP files are included whole, so
+    /// geometry and colours are exact. Default `output/<name>.step`.
+    #[tool(annotations(title = "Export STEP"))]
+    async fn export_step(
+        &self,
+        Parameters(p): Parameters<ExportStep>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.export_step(p))
+    }
+
     /// Write the board as a `.kicad_pcb` file that KiCad 8 or newer opens
     /// (default `output/<name>.kicad_pcb`). Zones are refilled by KiCad.
     #[tool(annotations(title = "Export KiCad board"))]

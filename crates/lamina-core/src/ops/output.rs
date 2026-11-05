@@ -224,3 +224,57 @@ impl Project {
         Ok(res)
     }
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+pub struct ExportStep {
+    /// Output file (default `output/<board name>.step` in the project).
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Drill vias through the board too (default false).
+    #[serde(default)]
+    pub vias: bool,
+    /// Leave the part models out and export the bare board.
+    #[serde(default)]
+    pub board_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct StepExported {
+    pub path: String,
+    /// Parts placed with their exact STEP model.
+    pub exact: usize,
+    /// Parts placed as faceted meshes (OBJ-only models).
+    pub meshed: usize,
+    pub bytes: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+impl Project {
+    /// The assembled board as a STEP file for mechanical CAD.
+    pub fn export_step(&self, p: ExportStep) -> Result<StepExported> {
+        let name = self.data.board.name.clone();
+        let path = match p.path {
+            Some(s) => std::path::PathBuf::from(s),
+            None => self.root().join("output").join(format!("{name}.step")),
+        };
+        let x = lamina_export::step_out::export_step(
+            &self.data,
+            self.root(),
+            &name,
+            &lamina_export::step_out::StepOptions {
+                vias: p.vias,
+                parts: !p.board_only,
+            },
+        )
+        .map_err(Error::Invalid)?;
+        write_atomic(&path, &x.bytes)?;
+        Ok(StepExported {
+            path: path.display().to_string(),
+            exact: x.exact,
+            meshed: x.meshed,
+            bytes: x.bytes.len(),
+            notes: x.notes,
+        })
+    }
+}

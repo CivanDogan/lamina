@@ -127,6 +127,15 @@ Eagle). Fab files have no parts or nets, so the board comes in as artwork:
 outline, holes, and copper and silkscreen as drawings, for viewing, rendering
 and checking against the original.
 
+## STEP for mechanical CAD
+
+`export_step` / `lamina export-step <dir>` write the assembled board as an
+AP214 STEP file: the board as a solid (outline, cut-outs, drilled holes;
+`vias` adds via holes) and every part placed as an assembly component.
+Part STEP files are copied in whole, so their exact surfaces, colours and
+names come through; OBJ-only models go in as faceted surfaces. The file opens
+in Fusion, FreeCAD, SolidWorks and other CAD programs for enclosure work.
+
 ## External autorouters
 
 `export_specctra` / `lamina export-dsn <dir>` write a Specctra DSN of the
