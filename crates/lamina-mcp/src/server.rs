@@ -24,7 +24,7 @@ Conventions: millimetres, Y up, rotation in degrees counter-clockwise, fixed ori
 others `top.silk`, `top.mask`, `top.paste`, `top.courtyard`, `top.fab`, `bottom.*`, \
 `outline`. Pads are referenced as `REFDES.PAD`, e.g. `U1.3`.
 
-A board may be modular: `design.jsonnet` (Jsonnet = JSON plus variables, functions and `import`) generates board.json, parts.json and nets.json. Those files are then read-only for the tools; edit the source as text and it is rebuilt before the next tool call. Shared blocks live in the workspace `lib` folders (see `lamina.json`) and `import 'lamina.libsonnet'` gives `merge`, `net`, `pads`, `rect`, `hole` and `corner_holes`. Placement and routing stay plain JSON and are edited with the tools as usual.
+A board may be modular: `design.jsonnet` (Jsonnet = JSON plus variables, functions and `import`) generates board.json, parts.json and nets.json. Those files are then read-only for the tools; edit the source as text and it is rebuilt before the next tool call. Shared blocks live in the workspace `lib` folders (see `lamina.json`) and `import 'lamina.libsonnet'` gives `merge`, `group`, `net`, `pads`, `rect`, `hole` and `corner_holes`. Placement and routing stay plain JSON and are edited with the tools as usual. Wrap each block instance in `lamina.group('name', ...)`: lay out one instance, then `repeat_layout` copies it to the others.
 
 Every change is applied and its new rule violations are reported. Pass `strict: true` \
 to refuse a change that would add an error instead. Malformed input is always refused. \
@@ -548,6 +548,41 @@ impl Lamina {
         Parameters(p): Parameters<Distribute>,
     ) -> Result<CallToolResult, McpError> {
         self.with(|proj| proj.distribute(p))
+    }
+
+    /// Copy the layout of one block onto others: placement of every part,
+    /// plus the tracks and vias hanging off the block's pads inside its
+    /// area (the target's old ones there are replaced). Blocks are group
+    /// names (`lamina.group` in the source, or `group` on parts) or refdes
+    /// lists. Parts are paired by footprint and wiring, not by name. The
+    /// anchor part stays put and the rest is arranged around it.
+    #[tool(annotations(title = "Repeat layout"))]
+    async fn repeat_layout(
+        &self,
+        Parameters(p): Parameters<RepeatLayout>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.repeat_layout(p))
+    }
+
+    /// Save a laid-out block (placement and its routing) as
+    /// `layouts/<name>.json` in the first workspace library, or in the board
+    /// when it has no workspace, so other boards can place it.
+    #[tool(annotations(title = "Save layout block"))]
+    async fn save_layout_block(
+        &self,
+        Parameters(p): Parameters<SaveLayoutBlock>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.save_layout_block(p))
+    }
+
+    /// Put a saved layout onto blocks of this board, like `repeat_layout`
+    /// but from `layouts/<name>.json` (the board's own, then the libraries').
+    #[tool(annotations(title = "Place layout block"))]
+    async fn place_layout_block(
+        &self,
+        Parameters(p): Parameters<PlaceLayoutBlock>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.place_layout_block(p))
     }
 
     /// Remove placements.

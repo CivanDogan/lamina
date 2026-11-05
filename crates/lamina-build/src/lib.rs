@@ -644,6 +644,31 @@ lamina.merge([
     }
 
     #[test]
+    fn group_tags_every_part_of_a_block() {
+        let (_t, board) = workspace();
+        write(
+            &board.join(SOURCE_FILE),
+            r#"
+local lamina = import 'lamina.libsonnet';
+local res = import 'res.libsonnet';
+lamina.merge([
+  { board: { name: 'a' } },
+  lamina.group('a', res.divider('RA', 'VIN', 'GND', 'VA', 'GND')),
+  lamina.group('b', res.divider('RB', 'VIN', 'GND', 'VB', 'GND')),
+  lamina.group('empty', { nets: { X: lamina.net([]) } }),
+])
+"#,
+        );
+        build(&board).unwrap();
+        let d = ProjectData::load(&board).unwrap();
+        let g = d.parts.groups();
+        assert_eq!(g["a"], vec!["RA1", "RA2"]);
+        assert_eq!(g["b"], vec!["RB1", "RB2"]);
+        assert_eq!(g.len(), 2);
+        assert_eq!(d.parts.parts["RA1"].value.as_deref(), Some("10k"));
+    }
+
+    #[test]
     fn library_change_triggers_rebuild_and_unplaces_removed_parts() {
         let (_t, board) = workspace();
         build(&board).unwrap();

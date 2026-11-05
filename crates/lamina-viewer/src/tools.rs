@@ -1419,6 +1419,87 @@ fn val(ui: &mut egui::Ui, v: impl Into<String>) {
 }
 
 impl App {
+    /// Group actions for a selected part: select the whole group, take the
+    /// layout of another group with this part kept in place, or give this
+    /// group's layout to every group wired the same way.
+    fn group_panel(&mut self, ui: &mut egui::Ui, d: &ProjectData, r: &str, g: &str) {
+        let fresh =
+            matches!(&self.group_matches, Some((k, t, _)) if k == g && *t == self.last_reload);
+        if !fresh {
+            let m = lamina_core::reuse::matching_groups(d, g);
+            self.group_matches = Some((g.to_string(), self.last_reload, m));
+        }
+        let matches = self
+            .group_matches
+            .as_ref()
+            .map(|m| m.2.clone())
+            .unwrap_or_default();
+        let members = d.parts.groups().remove(g).unwrap_or_default();
+        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new(format!("Group {g} · {} parts", members.len()))
+                .font(semibold(13.0))
+                .color(TEXT),
+        );
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            if widgets::text_button(ui, "Select group") {
+                self.sel = members
+                    .iter()
+                    .filter(|m| d.placement.placements.contains_key(*m))
+                    .map(|m| Sel::Part(m.clone()))
+                    .collect();
+            }
+            if !matches.is_empty() && widgets::text_button(ui, "Copy layout to all like it") {
+                let (from, to, n) = (g.to_string(), matches.clone(), matches.len());
+                self.commit(move |d| {
+                    let src = lamina_core::reuse::Block::Group(from.clone()).parts(d)?;
+                    let tgt = to
+                        .iter()
+                        .map(|t| lamina_core::reuse::Block::Group(t.clone()).parts(d))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let o = lamina_core::reuse::ApplyOpts {
+                        routing: true,
+                        ..Default::default()
+                    };
+                    lamina_core::reuse::repeat(d, &src, &tgt, None, &o)?;
+                    Ok(format!("layout of {from} copied to {n} group(s)"))
+                });
+            }
+        });
+        if matches.is_empty() {
+            ui.label(
+                egui::RichText::new("No other group is wired like this one.")
+                    .font(body(12.0))
+                    .color(TEXT_3),
+            );
+            return;
+        }
+        ui.horizontal(|ui| {
+            kv(ui, "layout like");
+            egui::ComboBox::from_id_salt(("layout-from", g))
+                .selected_text("choose a group")
+                .show_ui(ui, |ui| {
+                    for m in &matches {
+                        if ui.selectable_label(false, m).clicked() {
+                            let (from, to, anchor) = (m.clone(), g.to_string(), r.to_string());
+                            self.commit(move |d| {
+                                let src =
+                                    lamina_core::reuse::Block::Group(from.clone()).parts(d)?;
+                                let tgt = lamina_core::reuse::Block::Group(to.clone()).parts(d)?;
+                                let o = lamina_core::reuse::ApplyOpts {
+                                    routing: true,
+                                    ..Default::default()
+                                };
+                                lamina_core::reuse::repeat(d, &src, &[tgt], Some(&anchor), &o)?;
+                                Ok(format!("{to} laid out like {from}, around {anchor}"))
+                            });
+                        }
+                    }
+                });
+        });
+    }
+
     pub(crate) fn selection_panel(&mut self, ui: &mut egui::Ui) {
         let Some(l) = &self.loaded else { return };
         let d = l.data.clone();
@@ -1588,6 +1669,9 @@ impl App {
                         self.commit(move |d| edits::delete(d, &v));
                     }
                 });
+                if let Some(g) = part.and_then(|p| p.group.clone()) {
+                    self.group_panel(ui, &d, &r, &g);
+                }
             }
             Sel::Track { id, seg } => {
                 let Some(t) = d.routing.tracks.iter().find(|t| t.id == id).cloned() else {

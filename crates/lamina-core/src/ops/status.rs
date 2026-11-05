@@ -38,6 +38,9 @@ pub struct Status {
     /// Workspace root, when the board belongs to one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// Part groups (block instances) and their parts.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub groups: BTreeMap<String, Vec<String>>,
 }
 
 impl Project {
@@ -87,6 +90,7 @@ impl Project {
                 .map(|k| k.file_name().to_string())
                 .collect(),
             workspace: Workspace::find(self.root()).map(|w| w.root.display().to_string()),
+            groups: d.parts.groups(),
         }
     }
 }

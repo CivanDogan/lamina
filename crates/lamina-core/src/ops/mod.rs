@@ -1,5 +1,6 @@
 pub mod board;
 pub mod kicad;
+pub mod layout;
 pub mod lcsc;
 pub mod nets;
 pub mod output;
@@ -15,6 +16,7 @@ pub use kicad::{
     ExportKicad, ImportKicadBoard, ImportKicadFootprint, KicadExported, KicadSearch,
     SearchKicadFootprints,
 };
+pub use layout::{LayoutSaved, PlaceLayoutBlock, RepeatLayout, SaveLayoutBlock};
 pub use lcsc::{ImportEasyedaBoard, ImportLcsc, ImportMany, SearchPart, natural, today};
 pub use nets::{Connect, Disconnect, SetNets};
 pub use output::{

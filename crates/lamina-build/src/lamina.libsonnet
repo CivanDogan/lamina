@@ -34,6 +34,15 @@
     + (if hasParts then { parts: ap + bp } else {})
     + (if hasNets then { nets: nets } else {}),
 
+  // Put every part of a fragment in a group: one instance of a block.
+  // Groups of the same block can copy each other's layout (repeat_layout).
+  group(name, fragment)::
+    fragment + (
+      if std.objectHas(fragment, 'parts') then {
+        parts: { [r]: fragment.parts[r] + { group: name } for r in std.objectFields(fragment.parts) },
+      } else {}
+    ),
+
   // A net from pad references such as 'R1.1'.
   net(pads, class=null)::
     { pads: pads } + (if class == null then {} else { class: class }),

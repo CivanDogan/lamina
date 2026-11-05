@@ -115,6 +115,8 @@ pub(crate) struct App {
     diagonal_first: bool,
     toast: Option<(String, bool, Instant)>,
     own_edit: Option<Instant>,
+    /// Groups that can take a group's layout: (group, load time, groups).
+    group_matches: Option<(String, Option<Instant>, Vec<String>)>,
     mm_per_px: f64,
     last_cursor: Option<Point>,
     fit_pending: bool,
@@ -190,6 +192,7 @@ impl App {
             diagonal_first: false,
             toast: None,
             own_edit: None,
+            group_matches: None,
             mm_per_px: 0.05,
             last_cursor: None,
             fit_pending: false,
@@ -1426,6 +1429,9 @@ fn part_rows(d: &ProjectData, refdes: &str, rows: &mut Vec<(&str, String)>) {
             rows.push(("lcsc", c.clone()));
         }
         rows.push(("footprint", p.footprint.clone()));
+        if let Some(g) = &p.group {
+            rows.push(("group", g.clone()));
+        }
     }
     if let Some(pl) = d.placement.placements.get(refdes) {
         rows.push(("at", format!("{:.3}, {:.3}", pl.x, pl.y)));

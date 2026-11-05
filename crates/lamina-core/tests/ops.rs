@@ -435,3 +435,157 @@ fn kicad_footprint_import_and_board_round_trip() {
         "a second import needs replace"
     );
 }
+
+/// Two resistors in series as one block: IN - R.1, R.2 - S.1 (MID), S.2 - OUT.
+fn add_pair(p: &mut Project, r: &str, s: &str, group: &str, n: &str) {
+    add_resistor(p, r);
+    add_resistor(p, s);
+    let mut d = p.data.clone();
+    for x in [r, s] {
+        d.parts.parts.get_mut(x).unwrap().group = Some(group.into());
+    }
+    for (net, pads) in [
+        (format!("IN{n}"), vec![format!("{r}.1")]),
+        (format!("MID{n}"), vec![format!("{r}.2"), format!("{s}.1")]),
+        (format!("OUT{n}"), vec![format!("{s}.2")]),
+    ] {
+        d.nets.nets.insert(
+            net,
+            Net {
+                pads: pads.iter().map(|p| p.parse().unwrap()).collect(),
+                class: None,
+            },
+        );
+    }
+    p.commit(
+        d,
+        Touched::file(FileKind::Parts).and(FileKind::Nets),
+        false,
+        "pair",
+    )
+    .unwrap();
+}
+
+#[test]
+fn layout_blocks_repeat_save_and_place() {
+    let t = tempfile::tempdir().unwrap();
+    Workspace::create(t.path(), "ws").unwrap();
+    let mut a = Project::create(&t.path().join("boards/a"), "a").unwrap();
+    add_pair(&mut a, "R1", "R2", "ch1", "1");
+    add_pair(&mut a, "R3", "R4", "ch2", "2");
+    let pl = |x: f64, y: f64, rotation: f64| Placement {
+        rotation,
+        ..Placement::at(x, y)
+    };
+    a.place_many(PlaceMany {
+        placements: [
+            ("R1".to_string(), pl(10.0, 10.0, 0.0)),
+            ("R2".to_string(), pl(13.0, 10.0, 0.0)),
+            ("R3".to_string(), pl(10.0, 20.0, 90.0)),
+        ]
+        .into(),
+        strict: false,
+    })
+    .unwrap();
+    a.route_trace(
+        serde_json::from_value(serde_json::json!({"layer": "top", "points": ["R1.2", "R2.1"]}))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(a.status().groups.contains_key("ch2"));
+
+    // ch2 takes ch1's layout around R3, which is turned a quarter.
+    let r = a
+        .repeat_layout(
+            serde_json::from_value(serde_json::json!({"from": "ch1", "to": ["ch2"]})).unwrap(),
+        )
+        .unwrap();
+    assert!(
+        r.summary.contains("ch2: 2 parts around R3"),
+        "{}",
+        r.summary
+    );
+    let r4 = a.data.placement.placements["R4"];
+    assert!(
+        (r4.x - 10.0).abs() < 1e-9 && (r4.y - 23.0).abs() < 1e-9,
+        "{r4:?}"
+    );
+    assert_eq!(r4.rotation, 90.0);
+    let mid2: Vec<&Track> = a
+        .data
+        .routing
+        .tracks
+        .iter()
+        .filter(|t| t.net == "MID2")
+        .collect();
+    assert_eq!(mid2.len(), 1);
+    assert_eq!(
+        mid2[0].points,
+        vec![Point::new(10.0, 20.8), Point::new(10.0, 22.2)]
+    );
+    assert!(
+        !a.check()
+            .iter()
+            .any(|v| v.rule == "unrouted" && v.message.contains("MID2"))
+    );
+
+    // Saved into the workspace library, then placed on another board.
+    let saved = a
+        .save_layout_block(
+            serde_json::from_value(serde_json::json!({"from": "ch1", "name": "pair"})).unwrap(),
+        )
+        .unwrap();
+    assert!(
+        t.path().join("lib/layouts/pair.json").is_file(),
+        "{}",
+        saved.path
+    );
+    assert_eq!((saved.parts, saved.tracks), (2, 1));
+    let e = a
+        .save_layout_block(
+            serde_json::from_value(serde_json::json!({"from": "ch1", "name": "pair"})).unwrap(),
+        )
+        .unwrap_err();
+    assert!(e.to_string().contains("replace"), "{e}");
+
+    let mut b = Project::create(&t.path().join("boards/b"), "b").unwrap();
+    add_pair(&mut b, "Q7", "Q8", "x", "X");
+    b.place(Place {
+        refdes: "Q8".into(),
+        x: 40.0,
+        y: 5.0,
+        rotation: Some(180.0),
+        side: None,
+        locked: None,
+        strict: false,
+    })
+    .unwrap();
+    let r = b
+        .place_layout_block(
+            serde_json::from_value(
+                serde_json::json!({"name": "pair", "to": [["Q7", "Q8"]], "anchor": "Q8"}),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(r.summary.contains("around Q8"), "{}", r.summary);
+    let q7 = b.data.placement.placements["Q7"];
+    assert!(
+        (q7.x - 43.0).abs() < 1e-9 && (q7.y - 5.0).abs() < 1e-9,
+        "{q7:?}"
+    );
+    let mid: Vec<&Track> = b
+        .data
+        .routing
+        .tracks
+        .iter()
+        .filter(|t| t.net == "MIDX")
+        .collect();
+    assert_eq!(mid.len(), 1);
+    let e = b
+        .place_layout_block(
+            serde_json::from_value(serde_json::json!({"name": "nope", "to": ["x"]})).unwrap(),
+        )
+        .unwrap_err();
+    assert!(e.to_string().contains("saved layouts: pair"), "{e}");
+}

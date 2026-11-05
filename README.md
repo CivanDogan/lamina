@@ -85,12 +85,45 @@ MCP server and the viewer rebuild on their own when the source or an imported
 file changes, and refuse direct edits to the generated files. Placement and
 routing stay plain JSON and are edited as usual. `lamina.libsonnet` is built
 in: `merge` joins fragments (parts must be unique, nets with the same name
-join their pads), plus `net`, `pads`, `rect`, `hole` and `corner_holes`.
+join their pads), `group` tags a block instance, plus `net`, `pads`, `rect`,
+`hole` and `corner_holes`.
 
 Several boards share blocks through a workspace: `lamina workspace <dir>`
 writes `lamina.json` with `boards` and `lib` folders. Each lib folder is an
 import path and may hold shared `footprints/` and `models/`.
 `lamina new <dir> --modular` starts a board from a source template.
+
+## Reusing a block's layout
+
+Wrap each instance of a block in a group, lay out one of them, and copy that
+layout to the others:
+
+```jsonnet
+lamina.group('servo1', servo.channel('J2', 'R8', { pwm: 'PWM0', out: 'SERVO1', vservo: 'VSERVO', gnd: 'GND' })),
+lamina.group('servo2', servo.channel('J3', 'R9', { pwm: 'PWM1', out: 'SERVO2', vservo: 'VSERVO', gnd: 'GND' })),
+```
+
+```
+lamina repeat-layout boards/servo --from servo1 --to servo2 --anchor J3
+```
+
+Parts are paired by footprint and wiring, not by name. A footprint from
+another library still pairs when its pads sit in the same places, even if it
+is numbered the other way round or has its origin on pin 1; the part is turned
+or shifted so its pads land right. The anchor part stays where it is and the
+rest of the block is placed around it. Routing goes along: every track and via
+of a net that stays inside the block, and fan-outs to a via next to the parts
+on nets that leave it. Routes out to the rest of the board are left as they
+are, so check the ratsnest afterwards. A block can also be given as a refdes
+list (`--from D1,R1`).
+
+`lamina save-layout <board> --from led1 --name led_indicator` writes the
+layout to `layouts/led_indicator.json` in the workspace library, and
+`lamina place-layout <board> --name led_indicator --to led2` puts it on a
+block of any board in the workspace. MCP: `repeat_layout`, `save_layout_block`,
+`place_layout_block`. In the viewer, a selected part of a group offers
+*Select group*, *layout like* another group (the selected part stays put) and
+*Copy layout to all like it*.
 
 ## KiCad files
 

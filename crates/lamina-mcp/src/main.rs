@@ -84,6 +84,51 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Copy one block's layout onto others. A block is a group name or a
+    /// comma-separated refdes list (`D1,R1`).
+    RepeatLayout {
+        dir: PathBuf,
+        #[arg(long)]
+        from: String,
+        #[arg(long, required = true)]
+        to: Vec<String>,
+        /// Part that stays where it is (in the source or a target).
+        #[arg(long)]
+        anchor: Option<String>,
+        /// Copy placement only.
+        #[arg(long)]
+        no_routing: bool,
+        /// Also move locked parts.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Save a laid-out block as layouts/<name>.json (workspace library, else board).
+    SaveLayout {
+        dir: PathBuf,
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        anchor: Option<String>,
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Put a saved layout onto blocks of a board.
+    PlaceLayout {
+        dir: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long, required = true)]
+        to: Vec<String>,
+        /// Target part that stays where it is.
+        #[arg(long)]
+        anchor: Option<String>,
+        #[arg(long)]
+        no_routing: bool,
+        #[arg(long)]
+        force: bool,
+    },
     /// Create a workspace (lamina.json with a lib folder) in a folder.
     Workspace {
         dir: PathBuf,
@@ -96,6 +141,20 @@ enum Cmd {
     Check { dir: PathBuf },
     /// Print the JSON schema of a file kind.
     Schema { kind: String },
+}
+
+/// A block on the command line: `name` is a group, `A,B,C` a part list.
+fn block(s: &str) -> lamina_core::reuse::Block {
+    if s.contains(',') {
+        lamina_core::reuse::Block::Parts(
+            s.split(',')
+                .map(|r| r.trim().to_string())
+                .filter(|r| !r.is_empty())
+                .collect(),
+        )
+    } else {
+        lamina_core::reuse::Block::Group(s.to_string())
+    }
 }
 
 /// Hook for checkers from other crates (DRC). Called whenever a project opens.
@@ -209,6 +268,65 @@ fn main() -> anyhow::Result<()> {
             let p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
             let r = p.export_kicad(lamina_core::ExportKicad {
                 path: out.map(|o| o.to_string_lossy().to_string()),
+            })?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
+            Ok(())
+        }
+        Cmd::RepeatLayout {
+            dir,
+            from,
+            to,
+            anchor,
+            no_routing,
+            force,
+        } => {
+            let mut p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
+            let r = p.repeat_layout(lamina_core::RepeatLayout {
+                from: block(&from),
+                to: to.iter().map(|t| block(t)).collect(),
+                anchor,
+                at: None,
+                routing: !no_routing,
+                force,
+                strict: false,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
+            Ok(())
+        }
+        Cmd::SaveLayout {
+            dir,
+            from,
+            name,
+            anchor,
+            replace,
+        } => {
+            let p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
+            let r = p.save_layout_block(lamina_core::SaveLayoutBlock {
+                from: block(&from),
+                name,
+                anchor,
+                replace,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
+            Ok(())
+        }
+        Cmd::PlaceLayout {
+            dir,
+            name,
+            to,
+            anchor,
+            no_routing,
+            force,
+        } => {
+            let mut p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
+            let r = p.place_layout_block(lamina_core::PlaceLayoutBlock {
+                name,
+                to: to.iter().map(|t| block(t)).collect(),
+                anchor,
+                at: None,
+                routing: !no_routing,
+                force,
+                strict: false,
             })?;
             println!("{}", serde_json::to_string_pretty(&r)?);
             Ok(())

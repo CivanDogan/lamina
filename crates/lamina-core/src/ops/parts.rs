@@ -80,6 +80,9 @@ pub struct AddPart {
     pub dnp: bool,
     #[serde(default)]
     pub fields: BTreeMap<String, String>,
+    /// Block instance the part belongs to (see `repeat_layout`).
+    #[serde(default)]
+    pub group: Option<String>,
     /// Replace an existing part with the same refdes.
     #[serde(default)]
     pub replace: bool,
@@ -249,6 +252,7 @@ impl Project {
             description: p.description,
             dnp: p.dnp,
             fields: p.fields,
+            group: p.group,
         };
         d.parts.parts.insert(p.refdes.clone(), part);
         Ok(p.refdes)

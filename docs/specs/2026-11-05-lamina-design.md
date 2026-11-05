@@ -339,14 +339,30 @@ disappear from the source lose their placement.
 `lib` folders. Each lib folder is a Jsonnet import path and may hold
 shared `footprints/` and `models/`; a board's own cache wins over the
 libraries. `import 'lamina.libsonnet'` is built in and provides `merge`
-(parts must be unique, nets with the same name join their pads), `net`,
-`pads`, `rect`, `hole` and `corner_holes`.
+(parts must be unique, nets with the same name join their pads), `group`,
+`net`, `pads`, `rect`, `hole` and `corner_holes`.
 
 **Blocks** are plain Jsonnet functions returning fragments
 `{parts, nets}`; the caller passes a name prefix and the external net
-names. Layout reuse (a block placed and routed once, dropped onto the
-board several times as a group) is the natural next step and is not in
-this change.
+names. `lamina.group(name, fragment)` sets `group` on every part of an
+instance.
+
+**Layout reuse** (`lamina-core/src/reuse.rs`). A block is a group or a
+refdes list. Its layout is the placement of its parts in the frame of an
+anchor part, plus its copper: all tracks and vias of internal nets (every
+pad on the block) connected to its pads, and, on nets that leave the
+block, connected pieces that lie next to the parts and contain a via
+(fan-outs). Other routes on external nets differ per instance and are
+neither copied nor removed. A target is matched part for part by a
+backtracking search: candidates have footprints whose numbered pads line
+up with the block part's after a quarter turn and a shift (0.1 mm), and
+pads sharing a net in the block must share one in the target and the
+other way round. The target's anchor keeps its placement; the others are
+placed around it, turned and shifted per footprint fit. The target's old
+block copper is removed, the block's copper added with nets mapped. A
+layout can be saved as `layouts/<name>.json` (workspace library, else the
+board) and placed on any board. Mirroring a block to the other side is
+not supported.
 
 **Compatibility** with other PCB tools (KiCad, EasyEDA, Gerber, ODB++,
 IPC-2581, Specctra, STEP) is unaffected by this choice: import and

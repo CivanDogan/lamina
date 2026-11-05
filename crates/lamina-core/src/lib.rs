@@ -4,6 +4,7 @@
 pub mod lock;
 pub mod ops;
 pub mod project;
+pub mod reuse;
 pub mod validate;
 
 pub use lamina_model as model;
