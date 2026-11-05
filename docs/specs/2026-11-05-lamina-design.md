@@ -115,8 +115,12 @@ cache/models/     STEP as fetched, plus tessellated mesh (binary) per model
 cache/render/     PNG snapshots the agent asked for
 ```
 
-All geometry is in millimetres as f64, origin at the board outline's
-bounding-box lower-left, Y up, rotation counter-clockwise in degrees.
+All geometry is in millimetres as f64, Y up, rotation counter-clockwise
+in degrees. The project origin is fixed and independent of the outline:
+changing the outline never moves anything else. Mounting holes measured
+in the housing CAD are therefore stable from the first placement on. A
+convention, not a rule: put the origin at the intended lower-left corner
+of the finished board.
 Every file has a `schema` version field. The JSON schema for each file
 is published in `lamina-core` so an agent can read it with one tool call.
 
@@ -149,6 +153,17 @@ return what changed and any rule now violated, never silently succeed.
 `drc` and `connectivity` are cheap enough to run after every mutation and
 their result is included in the mutation's reply.
 
+Mutations apply and report by default. A part may be placed over
+another part's courtyard or inside a keep-out, and the reply lists the
+violations, because rough placement passes need that freedom. Every
+mutating tool takes `strict: true` to refuse instead, leaving the
+project untouched when the change would add a violation. Malformed
+input (unknown refdes, pad that does not exist, trace with one point,
+layer not in the stackup) is always refused regardless of `strict`.
+
+`set_nets` takes Lamina's own `nets.json` shape. Other netlist formats
+are imports and out of scope for version one, see the non-goals.
+
 ### 5.4 Parts and footprints
 
 No library ships with Lamina. Sources, in order of preference:
@@ -174,6 +189,15 @@ KiCad libraries.
 with the `truck` crate into a binary mesh cached beside it. The viewer
 and the 3D renderer load meshes, never STEP. A part with no model gets a
 grey box from its courtyard and the package height.
+
+`truck` reads a subset of STEP, and vendor files (multi-body
+assemblies, offset and toroidal surfaces) will sometimes fail. STEP
+loading is best effort in version one: a failure is reported with the
+reason, the part falls back to the grey box, and the fab outputs are
+unaffected. Mesh formats that need no B-rep kernel (glTF, OBJ, 3MF) are
+accepted directly when a manufacturer offers them. Extending `truck`'s
+STEP coverage is allowed if a MeraTag part needs it; linking
+OpenCASCADE or any C++ kernel is not, see Open.
 
 ### 5.5 Geometry and DRC
 
@@ -202,7 +226,8 @@ Two renderers share the same scene-building code in `lamina-core`:
 
 Version one has two paths. The agent routes by hand with `route_trace`,
 giving points and a layer, with the engine snapping to pads and
-refusing anything that violates DRC. And a built-in grid router (A* or
+reporting any clearance or width violation (or refusing it under
+`strict`, as for every mutation). And a built-in grid router (A* or
 Lee style, two to four layers, respects rules and keep-outs) for the
 easy nets. Freerouting as an external subprocess is allowed as an
 option behind a flag but is not required, since the user does not want
@@ -214,8 +239,14 @@ router is a later project.
 Written natively in Rust: Gerber X2 (RS-274X with attributes), Excellon
 drill with plated and non-plated files and slots, JLCPCB-format BOM and
 pick-and-place CSV, a STEP of the bare board outline (full assembly STEP
-is later). Tested by round-tripping through an independent Gerber
-viewer and by one real JLCPCB order.
+is later).
+
+Acceptance testing of the exporters, without any other EDA tool on the
+machine: `lamina-core` also contains a Gerber and Excellon reader, so
+tests export a board, read the files back, and compare the resulting
+copper and hole geometry against the model within tolerance. Golden
+files guard against regressions. Before the first order, a manual check
+in JLCPCB's online Gerber viewer, then the coupon board itself.
 
 ### 5.9 Order of work
 
@@ -255,6 +286,20 @@ on all layers, per-net widths, mask and paste overrides, fiducials.
 
 ## 7. Open
 
+- Part data source. There is no official LCSC or JLCPCB parts API. The
+  endpoints in common use (EasyEDA component and 3D model endpoints,
+  JLCPCB parts search) are undocumented and unauthenticated, and the
+  EasyEDA footprints and models they return are someone else's library
+  data, the same objection that excludes SnapEDA. Two options:
+  (a) use the unofficial endpoints for stock, price and package name
+  only, and build every footprint ourselves from IPC-7351 or the
+  datasheet; (b) also fetch and cache EasyEDA footprints and models into
+  the project. Awaiting the user's decision. Recommendation: (a).
+- 3D models in the final MeraTag deliverable: is a grey box acceptable
+  for parts whose vendor STEP `truck` cannot read, or must version one
+  be able to show every part, which would mean either extending `truck`
+  or allowing a C++ kernel (OpenCASCADE) as a dependency. Awaiting the
+  user's decision. Recommendation: grey box acceptable, no C++ kernel.
 - Licence for the repository. Proposed: MIT or Apache-2.0, as the user
   prefers. Not decided.
 - Whether to publish on crates.io at all.
