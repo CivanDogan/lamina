@@ -29,7 +29,7 @@ pub fn snapshot(
     width: u32,
     height: u32,
     opts2d: Option<&raster::Options2D>,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, Vec<String>), String> {
     match kind {
         Snapshot::Layers => {
             let def = raster::Options2D {
@@ -39,11 +39,11 @@ pub fn snapshot(
                 region: None,
             };
             let pm = raster::render_layers(s2, opts2d.unwrap_or(&def)).ok_or("bad image size")?;
-            raster::png(&pm)
+            Ok((raster::png(&pm)?, Vec::new()))
         }
         Snapshot::Side(side) => {
             let pm = raster::render_side(s2, side, width, height).ok_or("bad image size")?;
-            raster::png(&pm)
+            Ok((raster::png(&pm)?, Vec::new()))
         }
         Snapshot::View3D { yaw, pitch } => {
             let gpu = Gpu::headless()?;
@@ -57,7 +57,12 @@ pub fn snapshot(
             let rgba = gpu.read_rgba(&t)?;
             let mut pm = tiny_skia::Pixmap::new(width, height).ok_or("bad image size")?;
             pm.data_mut().copy_from_slice(&rgba);
-            raster::png(&pm)
+            let problems = scene
+                .problems
+                .iter()
+                .map(|(r, e)| format!("{r}: model not loaded: {e}"))
+                .collect();
+            Ok((raster::png(&pm)?, problems))
         }
     }
 }

@@ -16,6 +16,7 @@ lamina-route.workspace = true
 lamina-scene.workspace = true
 lamina-render.workspace = true
 lamina-export.workspace = true
+lamina-step.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true

@@ -1949,6 +1949,7 @@ dependencies = [
  "lamina-render",
  "lamina-route",
  "lamina-scene",
+ "lamina-step",
  "schemars",
  "serde",
  "serde_json",
@@ -2082,6 +2083,9 @@ dependencies = [
 [[package]]
 name = "lamina-step"
 version = "0.1.0"
+dependencies = [
+ "earcutr",
+]
 
 [[package]]
 name = "lamina-viewer"

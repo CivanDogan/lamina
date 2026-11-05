@@ -155,13 +155,24 @@ impl Project {
                     notes.push(format!("3D model `{}`", info.title));
                 }
                 if p.step {
-                    let step_path = root
-                        .join(MODEL_DIR)
-                        .join(format!("lcsc/{}.step", info.uuid));
+                    let rel_step = format!("lcsc/{}.step", info.uuid);
+                    let step_path = root.join(MODEL_DIR).join(&rel_step);
                     if p.refresh || !step_path.exists() {
                         match self.source().model_step(&info.uuid) {
                             Ok(b) => write_atomic(&step_path, &b)?,
                             Err(e) => notes.push(format!("STEP not downloaded: {e}")),
+                        }
+                    }
+                    // The STEP has the same geometry in the same frame with
+                    // smooth surfaces; use it when it loads.
+                    if step_path.exists() {
+                        match lamina_step::load(&step_path) {
+                            Ok(_) => {
+                                if let Some(m) = im.footprint.model.as_mut() {
+                                    m.file = rel_step;
+                                }
+                            }
+                            Err(e) => notes.push(format!("STEP did not load, using OBJ: {e}")),
                         }
                     }
                 }

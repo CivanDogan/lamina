@@ -121,7 +121,7 @@ impl Project {
             layers,
             region: p.region,
         };
-        let png =
+        let (png, problems) =
             lamina_render::snapshot(&s2, &s3, kind, w, h, Some(&opts)).map_err(Error::Invalid)?;
         let name = p.name.unwrap_or_else(|| {
             match p.view {
@@ -145,7 +145,7 @@ impl Project {
         let path = self.root().join(RENDER_DIR).join(format!("{safe}.png"));
         std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| Error::io(&path, e))?;
         std::fs::write(&path, &png).map_err(|e| Error::io(&path, e))?;
-        let mut notes = Vec::new();
+        let mut notes = problems;
         if p.view == RenderView::View3D {
             let missing: Vec<&str> = s3
                 .instances

@@ -2,6 +2,7 @@
 
 pub mod mesh;
 pub mod obj;
+pub mod p21;
 pub mod step;
 
 pub use mesh::{Mesh, MeshPart};
