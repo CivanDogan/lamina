@@ -101,6 +101,10 @@ impl Lamina {
                 "no project is open; call `open` with a folder path first",
             ));
         };
+        // Pick up edits made in the viewer or by hand since the last call.
+        if let Err(e) = p.sync() {
+            return Ok(error_result(format!("could not re-read the project: {e}")));
+        }
         Ok(match f(p) {
             Ok(v) => json_result(&v),
             Err(e) => error_result(e),
@@ -534,6 +538,9 @@ impl Lamina {
                 "no project is open; call `open` with a folder path first",
             ));
         };
+        if let Err(e) = proj.sync() {
+            return Ok(error_result(format!("could not re-read the project: {e}")));
+        }
         match proj.render(p) {
             Ok(r) => {
                 use base64::Engine;

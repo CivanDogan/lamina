@@ -246,3 +246,44 @@ fn date_format() {
     assert_eq!(d.len(), 10);
     assert!(d.starts_with("20"));
 }
+
+#[test]
+fn shared_editor_and_engine_see_each_other() {
+    let (t, mut engine) = new_project();
+    add_resistor(&mut engine, "R1");
+    engine
+        .place(Place {
+            refdes: "R1".into(),
+            x: 5.0,
+            y: 5.0,
+            rotation: None,
+            side: None,
+            locked: None,
+            strict: false,
+        })
+        .unwrap();
+    // The viewer opens the same folder while the engine holds the lock.
+    let root = t.path().join("b");
+    let mut viewer = Project::open_shared(&root).unwrap();
+    let mut d = viewer.data.clone();
+    d.placement.placements.get_mut("R1").unwrap().x = 9.0;
+    let r = viewer.apply(d, "drag R1").unwrap();
+    assert_eq!(r.changed, vec!["placement.json".to_string()]);
+
+    // The engine notices before its next change and keeps the viewer's edit.
+    assert!(engine.sync().unwrap());
+    assert!(!engine.sync().unwrap());
+    engine
+        .rotate_part(RotatePart {
+            refdes: "R1".into(),
+            rotation: Some(90.0),
+            by: None,
+            force: false,
+            strict: false,
+        })
+        .unwrap();
+    let pl = ProjectData::load(&root).unwrap().placement.placements["R1"];
+    assert_eq!((pl.x, pl.rotation), (9.0, 90.0));
+    assert!(viewer.sync().unwrap());
+    assert_eq!(viewer.data.placement.placements["R1"].rotation, 90.0);
+}

@@ -398,3 +398,113 @@ pub fn hint(p: &egui::Painter, rect: Rect, text: &str) {
         TEXT_3,
     );
 }
+
+/// Toolbar button: label with its shortcut key, accent when active.
+pub fn tool_button(ui: &mut egui::Ui, label: &str, key: &str, active: bool) -> egui::Response {
+    let lg = ui
+        .painter()
+        .layout_no_wrap(label.to_string(), body(12.5), TEXT);
+    let kg = ui
+        .painter()
+        .layout_no_wrap(key.to_string(), mono(10.5), TEXT_3);
+    let w = lg.size().x + kg.size().x + 24.0;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 28.0), Sense::click());
+    let p = ui.painter();
+    if active {
+        p.rect_filled(rect, CornerRadius::same(6), ACCENT_DIM);
+    } else if resp.hovered() {
+        p.rect_filled(rect, CornerRadius::same(6), HOVER);
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let x = rect.left() + 10.0;
+    p.text(
+        Pos2::new(x, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        body(12.5),
+        if active { ACCENT } else { TEXT },
+    );
+    p.text(
+        Pos2::new(x + lg.size().x + 6.0, rect.center().y + 0.5),
+        Align2::LEFT_CENTER,
+        key,
+        mono(10.5),
+        if active {
+            ACCENT.gamma_multiply(0.7)
+        } else {
+            TEXT_3
+        },
+    );
+    resp
+}
+
+/// Thin vertical divider inside a toolbar.
+pub fn vdivider(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(9.0, 18.0), Sense::hover());
+    ui.painter().rect_filled(
+        Rect::from_center_size(rect.center(), Vec2::new(1.0, 18.0)),
+        0.0,
+        HAIRLINE,
+    );
+}
+
+/// Small pill showing a value; returns the response for clicks.
+pub fn pill(ui: &mut egui::Ui, swatch: Option<Color32>, text: &str) -> egui::Response {
+    let g = ui
+        .painter()
+        .layout_no_wrap(text.to_string(), mono(11.5), TEXT_2);
+    let sw = if swatch.is_some() { 16.0 } else { 0.0 };
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(g.size().x + 18.0 + sw, 28.0), Sense::click());
+    let p = ui.painter();
+    if resp.hovered() {
+        p.rect_filled(rect, CornerRadius::same(6), HOVER);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let mut x = rect.left() + 9.0;
+    if let Some(c) = swatch {
+        p.rect_filled(
+            Rect::from_center_size(Pos2::new(x + 5.0, rect.center().y), Vec2::splat(10.0)),
+            CornerRadius::same(3),
+            Color32::from_rgb(c.r(), c.g(), c.b()),
+        );
+        x += sw;
+    }
+    p.text(
+        Pos2::new(x, rect.center().y),
+        Align2::LEFT_CENTER,
+        text,
+        mono(11.5),
+        if resp.hovered() { TEXT } else { TEXT_2 },
+    );
+    resp
+}
+
+/// Floating message over the canvas.
+pub fn toast(p: &egui::Painter, at: Pos2, text: &str, color: Color32, alpha: f32) {
+    let g = p.layout_no_wrap(text.to_string(), body(12.5), TEXT.gamma_multiply(alpha));
+    let rect = Rect::from_center_size(at, g.size() + Vec2::new(28.0, 14.0));
+    p.rect_filled(
+        rect,
+        CornerRadius::same(8),
+        RAISED.gamma_multiply(0.96 * alpha),
+    );
+    p.rect_stroke(
+        rect,
+        CornerRadius::same(8),
+        Stroke::new(1.0, HAIRLINE.gamma_multiply(alpha)),
+        StrokeKind::Inside,
+    );
+    p.circle_filled(
+        Pos2::new(rect.left() + 12.0, rect.center().y),
+        3.0,
+        color.gamma_multiply(alpha),
+    );
+    p.galley(
+        Pos2::new(rect.left() + 21.0, rect.top() + 7.0),
+        g,
+        TEXT.gamma_multiply(alpha),
+    );
+}

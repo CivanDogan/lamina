@@ -1,5 +1,8 @@
+mod editor;
+mod edits;
 mod live;
 mod style;
+mod tools;
 mod widgets;
 
 use std::collections::BTreeMap;
@@ -17,17 +20,20 @@ use lamina_model::{
 use lamina_render::{Camera, Gpu, Gpu2D, Gpu3D, MeshCache, Target};
 use lamina_scene::SceneLayer;
 
+use editor::Editor;
+use edits::Sel;
 use live::{Live, Loaded, Msg};
 use style::*;
+use tools::{Gesture, Placing, Settling, Tool};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
+pub(crate) enum Mode {
     TwoD,
     ThreeD,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum Pick {
+pub(crate) enum Pick {
     Pad {
         part: String,
         pad: String,
@@ -50,6 +56,13 @@ enum Pick {
     Part {
         refdes: String,
     },
+    Keepout {
+        id: String,
+    },
+    Hole {
+        id: String,
+    },
+    Outline,
 }
 
 impl Pick {
@@ -58,7 +71,7 @@ impl Pick {
             Pick::Pad { net, .. } => net.as_deref(),
             Pick::Track { net, .. } | Pick::Via { net, .. } => Some(net),
             Pick::Fill { net, .. } => net.as_deref(),
-            Pick::Part { .. } => None,
+            Pick::Part { .. } | Pick::Keepout { .. } | Pick::Hole { .. } | Pick::Outline => None,
         }
     }
 
@@ -70,7 +83,7 @@ impl Pick {
     }
 }
 
-struct App {
+pub(crate) struct App {
     root: Option<PathBuf>,
     live: Option<Live>,
     loaded: Option<Box<Loaded>>,
@@ -89,7 +102,22 @@ struct App {
     cam_fitted: bool,
     visible: BTreeMap<SceneLayer, bool>,
     hover: Option<Pick>,
-    pinned: Option<Pick>,
+    sel: Vec<Sel>,
+    editor: Option<Editor>,
+    tool: Tool,
+    gesture: Gesture,
+    route: Option<edits::Route>,
+    poly: Vec<Point>,
+    placing: Option<Placing>,
+    settling: Option<Settling>,
+    grid_i: usize,
+    active: u8,
+    diagonal_first: bool,
+    toast: Option<(String, bool, Instant)>,
+    own_edit: Option<Instant>,
+    mm_per_px: f64,
+    last_cursor: Option<Point>,
+    fit_pending: bool,
     flashes: Vec<(Rect, Instant)>,
     last_reload: Option<Instant>,
     cursor_mm: Option<Point>,
@@ -149,7 +177,22 @@ impl App {
             cam_fitted: false,
             visible: BTreeMap::new(),
             hover: None,
-            pinned: None,
+            sel: Vec::new(),
+            editor: None,
+            tool: Tool::Select,
+            gesture: Gesture::None,
+            route: None,
+            poly: Vec::new(),
+            placing: None,
+            settling: None,
+            grid_i: 2,
+            active: 0,
+            diagonal_first: false,
+            toast: None,
+            own_edit: None,
+            mm_per_px: 0.05,
+            last_cursor: None,
+            fit_pending: false,
             flashes: Vec::new(),
             last_reload: None,
             cursor_mm: None,
@@ -177,10 +220,13 @@ impl App {
         match Live::start(root.clone(), move || ctx2.request_repaint()) {
             Ok(l) => {
                 self.live = Some(l);
+                let ctx3 = ctx.clone();
+                self.editor = Some(Editor::start(root.clone(), move || ctx3.request_repaint()));
                 self.loaded = None;
                 self.fitted = false;
                 self.cam_fitted = false;
-                self.pinned = None;
+                self.sel.clear();
+                self.set_tool(Tool::Select);
                 self.error = None;
                 if let Some(f) = config_file() {
                     let _ = std::fs::create_dir_all(f.parent().unwrap());
@@ -193,12 +239,28 @@ impl App {
     }
 
     fn poll(&mut self) {
+        while let Some(r) = self.editor.as_mut().and_then(|e| e.poll()) {
+            if let Some(s) = self.settling.as_mut() {
+                s.replied = true;
+                if !r.ok {
+                    self.settling = None;
+                }
+            }
+            self.toast = Some((r.message, r.ok, Instant::now()));
+        }
         let Some(live) = &self.live else { return };
         while let Ok(msg) = live.rx.try_recv() {
             match msg {
                 Msg::Loaded(l) => {
                     let now = Instant::now();
-                    if self.loaded.is_some() {
+                    if self.settling.as_ref().is_some_and(|s| s.replied) {
+                        self.settling = None;
+                    }
+                    // Flash only what someone else changed.
+                    let own = self
+                        .own_edit
+                        .is_some_and(|t| t.elapsed() < Duration::from_millis(2500));
+                    if self.loaded.is_some() && !own {
                         for r in &l.changed {
                             self.flashes.push((*r, now));
                         }
@@ -284,6 +346,7 @@ impl App {
                         net: it.net.clone().unwrap_or_default(),
                     },
                 ),
+                Owner::Hole { id } => (1, Pick::Hole { id: id.clone() }),
                 Owner::Track { id, seg } => (
                     2,
                     Pick::Track {
@@ -335,6 +398,42 @@ impl App {
                 }
             }
         }
+        for h in &d.board.holes {
+            if h.at.dist(p) <= h.drill.min_size() / 2.0 {
+                return Some(Pick::Hole { id: h.id.clone() });
+            }
+        }
+        let edge = 5.0 * self.mm_per_px;
+        let near_edge = |c: &lamina_model::Contour| {
+            let pts = c.flatten(0.02);
+            (0..pts.len())
+                .any(|i| lamina_geom::prim::seg_point(pts[i], pts[(i + 1) % pts.len()], p) <= edge)
+        };
+        if self.is_visible(SceneLayer::Keepout) {
+            for k in &d.routing.keepouts {
+                let pts = k.outline.flatten(0.02);
+                if near_edge(&k.outline) || lamina_geom::prim::ring_contains(&pts, p) {
+                    return Some(Pick::Keepout { id: k.id.clone() });
+                }
+            }
+        }
+        for z in &d.routing.zones {
+            let visible = z.layers.iter().any(|l| {
+                l.copper()
+                    .is_some_and(|c| self.is_visible(SceneLayer::Copper(c.index(n))))
+            });
+            if visible && near_edge(&z.outline) {
+                return Some(Pick::Fill {
+                    zone: z.id.clone(),
+                    net: z.net.clone(),
+                });
+            }
+        }
+        if let Some(o) = &d.board.outline {
+            if near_edge(o) {
+                return Some(Pick::Outline);
+            }
+        }
         None
     }
 
@@ -357,11 +456,7 @@ impl App {
             .max()
             .unwrap_or(0)
             + 1;
-        let refdes = self
-            .pinned
-            .as_ref()
-            .and_then(|p| p.part())
-            .map(str::to_string);
+        let refdes = self.sel.iter().find_map(|s| s.part()).map(str::to_string);
         notes.notes.push(lamina_model::Note {
             id: format!("n{next}"),
             text,
@@ -508,7 +603,12 @@ impl eframe::App for App {
             || self
                 .note_status
                 .as_ref()
-                .is_some_and(|(_, t)| t.elapsed() < Duration::from_secs(4));
+                .is_some_and(|(_, t)| t.elapsed() < Duration::from_secs(4))
+            || self
+                .toast
+                .as_ref()
+                .is_some_and(|(_, _, t)| t.elapsed() < Duration::from_secs(4))
+            || self.editor.as_ref().is_some_and(|e| e.busy > 0);
         self.flashes
             .retain(|(_, t)| t.elapsed() < Duration::from_millis(900));
         if animating {
@@ -733,26 +833,24 @@ impl App {
             .show(ui, |ui| {
                 widgets::section_title(ui, "Inspector");
                 ui.add_space(6.0);
-                let shown = self.hover.clone().or_else(|| self.pinned.clone());
-                match (&shown, &self.loaded) {
-                    (Some(p), Some(l)) => self.pick_details(ui, p, &l.data),
-                    _ => {
-                        ui.label(
-                            egui::RichText::new(
-                                "Hover a pad, trace or part to inspect it. Click to pin it here.",
-                            )
-                            .font(body(12.5))
-                            .color(TEXT_3),
-                        );
+                if !self.sel.is_empty() {
+                    self.selection_panel(ui);
+                }
+                if self.sel.is_empty() {
+                    match (&self.hover, &self.loaded) {
+                        (Some(p), Some(l)) => self.pick_details(ui, p, &l.data),
+                        _ => {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Hover a pad, track or part to inspect it. Click to select and edit it.",
+                                )
+                                .font(body(12.5))
+                                .color(TEXT_3),
+                            );
+                        }
                     }
                 }
-                if self.pinned.is_some() && self.hover.is_none() {
-                    ui.add_space(4.0);
-                    if widgets::text_button(ui, "Unpin") {
-                        self.pinned = None;
-                        self.dirty = true;
-                    }
-                }
+                self.unplaced_panel(ui);
 
                 ui.add_space(18.0);
                 widgets::hairline(ui);
@@ -872,6 +970,26 @@ impl App {
                 title = format!("Pour {zone}");
                 rows.push(("net", net.clone().unwrap_or_else(|| "none".into())));
             }
+            Pick::Keepout { id } => {
+                title = format!("Keep-out {id}");
+                if let Some(k) = d.routing.keepouts.iter().find(|k| &k.id == id) {
+                    let ls: Vec<String> = k.layers.iter().map(|l| l.to_string()).collect();
+                    rows.push(("layers", ls.join(", ")));
+                }
+            }
+            Pick::Hole { id } => {
+                title = format!("Hole {id}");
+                if let Some(h) = d.board.holes.iter().find(|h| &h.id == id) {
+                    rows.push(("at", format!("{:.3}, {:.3}", h.at.x, h.at.y)));
+                    rows.push(("drill", format!("{:.2} mm", h.drill.min_size())));
+                }
+            }
+            Pick::Outline => {
+                title = "Board outline".to_string();
+                if let Some(b) = d.board.outline.as_ref().and_then(|o| o.bbox()) {
+                    rows.push(("size", format!("{:.2} × {:.2} mm", b.width(), b.height())));
+                }
+            }
         }
         ui.label(egui::RichText::new(title).font(semibold(16.0)).color(TEXT));
         ui.add_space(6.0);
@@ -906,7 +1024,7 @@ impl App {
             }
         }
         ui.add_space(6.0);
-        let anchor = match (self.pinned.as_ref().and_then(|p| p.part()), self.note_at) {
+        let anchor = match (self.sel.iter().find_map(|s| s.part()), self.note_at) {
             (Some(r), _) => format!("Attached to {r}"),
             (None, Some(p)) => format!("Attached to ({:.2}, {:.2}) mm", p.x, p.y),
             _ => "Click the board to attach a location".to_string(),
@@ -1035,11 +1153,8 @@ impl App {
                 self.mode = Mode::ThreeD;
                 self.dirty = true;
             }
-            if keys.0 {
-                match self.mode {
-                    Mode::TwoD => self.fit_2d(size_px),
-                    Mode::ThreeD => self.fit_3d(),
-                }
+            if keys.0 && self.mode == Mode::ThreeD {
+                self.fit_3d();
             }
         }
         let inside = hover_pos.is_some_and(|p| rect.contains(p));
@@ -1065,25 +1180,30 @@ impl App {
                     self.center[1] += before.y - after.y;
                     self.dirty = true;
                 }
-                if resp.dragged() {
+                // Pan with the right or middle button, or Space + left drag.
+                let space = ui.input(|i| i.key_down(egui::Key::Space))
+                    && !ui.ctx().egui_wants_keyboard_input();
+                let panning = resp.dragged_by(egui::PointerButton::Secondary)
+                    || resp.dragged_by(egui::PointerButton::Middle)
+                    || (space && resp.dragged_by(egui::PointerButton::Primary));
+                if panning {
                     let d = resp.drag_delta();
                     self.center[0] -= d.x as f64 / xf.ppm_pt;
                     self.center[1] += d.y as f64 / xf.ppm_pt;
                     self.dirty = true;
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 }
-                if resp.double_clicked() {
-                    self.fit_2d(size_px);
-                }
                 let xf = Xf {
                     rect,
                     center: self.center,
                     ppm_pt: self.ppm / ppp as f64,
                 };
+                self.mm_per_px = 1.0 / xf.ppm_pt;
                 self.cursor_mm = hover_pos
                     .filter(|p| rect.contains(*p))
                     .map(|p| xf.to_board(p));
-                let hover = if resp.dragged() {
+                let busy = !matches!(self.gesture, Gesture::None) || panning;
+                let hover = if busy {
                     None
                 } else {
                     self.cursor_mm.and_then(|p| self.pick(p))
@@ -1091,9 +1211,16 @@ impl App {
                 if hover != self.hover {
                     self.hover = hover;
                 }
-                if resp.clicked() {
-                    self.pinned = self.hover.clone();
-                    self.note_at = self.cursor_mm;
+                if !space {
+                    self.edit_input(ui, &resp, &xf, size_px);
+                }
+                if std::mem::take(&mut self.fit_pending) {
+                    self.fit_2d(size_px);
+                }
+                if self.tool != Tool::Select || self.placing.is_some() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+                } else if matches!(self.gesture, Gesture::Drag { .. } | Gesture::Grab { .. }) {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
                 }
             }
             Mode::ThreeD => {
@@ -1177,6 +1304,22 @@ impl App {
                 ppm_pt: self.ppm / ppp as f64,
             };
             self.overlays(&painter, &xf);
+            self.edit_overlays(&painter, &xf);
+            widgets::hint(&painter, rect, self.tool_hint());
+            self.toolbar(ui, rect);
+            if let Some((msg, ok, t)) = &self.toast {
+                let age = t.elapsed().as_secs_f32();
+                if age < 4.0 {
+                    let a = if age > 3.4 { (4.0 - age) / 0.6 } else { 1.0 };
+                    widgets::toast(
+                        &painter,
+                        Pos2::new(rect.center().x, rect.top() + 72.0),
+                        msg,
+                        if *ok { OK } else { ERROR },
+                        a,
+                    );
+                }
+            }
         } else {
             widgets::hint(
                 &painter,
@@ -1188,8 +1331,8 @@ impl App {
 
     fn overlays(&self, painter: &egui::Painter, xf: &Xf) {
         let Some(l) = &self.loaded else { return };
-        // Net under the cursor (or pinned), outlined in the accent colour.
-        let focus = self.hover.as_ref().or(self.pinned.as_ref());
+        // Net under the cursor, outlined in the accent colour.
+        let focus = self.hover.as_ref();
         if let Some(net) = focus.and_then(|p| p.net()) {
             for it in &l.analysis.geometry.copper {
                 if it.net.as_deref() == Some(net) && self.is_visible(SceneLayer::Copper(it.layer)) {
@@ -1208,7 +1351,10 @@ impl App {
             ) {
                 if let Some(c) = lamina_geom::courtyard(fp, pl) {
                     let pts: Vec<Pos2> = c.into_iter().map(|p| xf.to_screen(p)).collect();
-                    painter.add(egui::Shape::closed_line(pts, Stroke::new(1.5, ACCENT)));
+                    painter.add(egui::Shape::closed_line(
+                        pts,
+                        Stroke::new(1.2, ACCENT.gamma_multiply(0.55)),
+                    ));
                 }
             }
         }

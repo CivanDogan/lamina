@@ -63,7 +63,10 @@ pub struct Project {
     checkers: Vec<Checker>,
     source: std::sync::Arc<dyn lamina_parts::PartSource>,
     cached: Option<Vec<Violation>>,
-    _lock: Lock,
+    /// Size and modification time of every project file at the last
+    /// load or save, to notice edits made by someone else.
+    stamp: Vec<(String, u64, std::time::SystemTime)>,
+    _lock: Option<Lock>,
 }
 
 impl std::fmt::Debug for Project {
@@ -101,21 +104,46 @@ impl Project {
             checkers: Vec::new(),
             source: std::sync::Arc::new(lamina_parts::HttpSource::default()),
             cached: None,
-            _lock: lock,
+            stamp: disk_stamp(dir),
+            _lock: Some(lock),
         })
     }
 
+    /// Open a project and take its lock, so no second engine writes it.
     pub fn open(dir: &Path) -> Result<Project> {
-        let data = ProjectData::load(dir)?;
         let lock = Lock::acquire(dir)?;
+        let mut p = Project::open_shared(dir)?;
+        p._lock = Some(lock);
+        Ok(p)
+    }
+
+    /// Open without taking the lock. The viewer edits this way next to an
+    /// agent; both sides call [`Project::sync`] before each change.
+    pub fn open_shared(dir: &Path) -> Result<Project> {
+        let stamp = disk_stamp(dir);
+        let data = ProjectData::load(dir)?;
         Ok(Project {
             root: dir.to_path_buf(),
             data,
             checkers: Vec::new(),
             source: std::sync::Arc::new(lamina_parts::HttpSource::default()),
             cached: None,
-            _lock: lock,
+            stamp,
+            _lock: None,
         })
+    }
+
+    /// Reload when the files changed on disk since the last load or save.
+    /// Returns whether anything was reloaded.
+    pub fn sync(&mut self) -> Result<bool> {
+        let now = disk_stamp(&self.root);
+        if now == self.stamp {
+            return Ok(false);
+        }
+        self.data = ProjectData::load(&self.root)?;
+        self.cached = None;
+        self.stamp = now;
+        Ok(true)
     }
 
     pub fn root(&self) -> &Path {
@@ -163,6 +191,7 @@ impl Project {
 
     /// Re-read everything from disk (for example after the user edited files).
     pub fn reload(&mut self) -> Result<()> {
+        self.stamp = disk_stamp(&self.root);
         self.data = ProjectData::load(&self.root)?;
         self.cached = None;
         Ok(())
@@ -223,6 +252,7 @@ impl Project {
             self.data.save(&self.root, *k)?;
             changed.push(k.file_name().to_string());
         }
+        self.stamp = disk_stamp(&self.root);
         let errors = after
             .iter()
             .filter(|v| v.severity == Severity::Error)
@@ -239,6 +269,68 @@ impl Project {
             notes: Vec::new(),
         })
     }
+
+    /// Make `new` the project state, writing only the files that differ.
+    pub fn apply(&mut self, new: ProjectData, summary: impl Into<String>) -> Result<OpResult> {
+        let touched = touched_between(&self.data, &new);
+        self.commit(new, touched, false, summary)
+    }
+}
+
+/// Files that differ between two states.
+pub fn touched_between(a: &ProjectData, b: &ProjectData) -> Touched {
+    let mut t = Touched::default();
+    if a.board != b.board {
+        t.files.insert(FileKind::Board);
+    }
+    if a.parts != b.parts {
+        t.files.insert(FileKind::Parts);
+    }
+    if a.nets != b.nets {
+        t.files.insert(FileKind::Nets);
+    }
+    if a.placement != b.placement {
+        t.files.insert(FileKind::Placement);
+    }
+    if a.routing != b.routing {
+        t.files.insert(FileKind::Routing);
+    }
+    if a.notes != b.notes {
+        t.files.insert(FileKind::Notes);
+    }
+    for (id, fp) in &b.footprints {
+        if a.footprints.get(id) != Some(fp) {
+            t.footprints.insert(id.clone());
+        }
+    }
+    for id in a.footprints.keys() {
+        if !b.footprints.contains_key(id) {
+            t.removed_footprints.insert(id.clone());
+        }
+    }
+    t
+}
+
+fn disk_stamp(root: &Path) -> Vec<(String, u64, std::time::SystemTime)> {
+    let mut out = Vec::new();
+    let mut add = |name: String, path: &Path| {
+        if let Ok(m) = std::fs::metadata(path) {
+            out.push((name, m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)));
+        }
+    };
+    for k in FileKind::ALL {
+        add(k.file_name().to_string(), &root.join(k.file_name()));
+    }
+    if let Ok(rd) = std::fs::read_dir(root.join(FOOTPRINT_DIR)) {
+        let mut files: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        files.sort();
+        for f in files {
+            if f.extension().is_some_and(|x| x == "json") {
+                add(f.display().to_string(), &f);
+            }
+        }
+    }
+    out
 }
 
 /// Next free id like `t12` given existing ids with the same prefix.

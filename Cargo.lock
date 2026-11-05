@@ -2092,6 +2092,7 @@ name = "lamina-viewer"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "lamina-core",
  "lamina-drc",
  "lamina-geom",
  "lamina-model",
