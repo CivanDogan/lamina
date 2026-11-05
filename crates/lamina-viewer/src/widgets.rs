@@ -1,0 +1,400 @@
+//! Hand-drawn widgets in the viewer's own vocabulary.
+
+use std::time::Instant;
+
+use eframe::egui::{
+    self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
+};
+
+use crate::style::*;
+
+/// Three stacked plates and the name.
+pub fn wordmark(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(86.0, 24.0), Sense::hover());
+    let p = ui.painter();
+    let x = rect.left();
+    let cy = rect.center().y;
+    for (i, a) in [(0, 1.0), (1, 0.7), (2, 0.45)] {
+        let y = cy - 5.0 + i as f32 * 4.5;
+        let r = Rect::from_min_size(Pos2::new(x + i as f32 * 1.5, y), Vec2::new(14.0, 2.6));
+        p.rect_filled(r, CornerRadius::same(1), ACCENT.gamma_multiply(a));
+    }
+    p.text(
+        Pos2::new(x + 22.0, cy),
+        Align2::LEFT_CENTER,
+        "lamina",
+        semibold(16.0),
+        TEXT,
+    );
+}
+
+/// Two-option switch with a sliding thumb. Returns true when changed.
+pub fn segmented(ui: &mut egui::Ui, rect: Rect, labels: &[&str], sel: &mut usize) -> bool {
+    let id = ui.scope_id().with("segmented");
+    let resp = ui.interact(rect, id, Sense::click());
+    let p = ui.painter();
+    p.rect_filled(rect, CornerRadius::same(7), CANVAS_EDGE);
+    p.rect_stroke(
+        rect,
+        CornerRadius::same(7),
+        Stroke::new(1.0, HAIRLINE),
+        StrokeKind::Inside,
+    );
+    let n = labels.len() as f32;
+    let w = (rect.width() - 4.0) / n;
+    let x = ui.ctx().animate_value_with_time(id, *sel as f32, 0.18);
+    let thumb = Rect::from_min_size(
+        Pos2::new(rect.left() + 2.0 + x * w, rect.top() + 2.0),
+        Vec2::new(w, rect.height() - 4.0),
+    );
+    p.rect_filled(thumb, CornerRadius::same(5), RAISED);
+    p.rect_stroke(
+        thumb,
+        CornerRadius::same(5),
+        Stroke::new(1.0, Color32::from_rgb(0x2E, 0x35, 0x40)),
+        StrokeKind::Inside,
+    );
+    let mut changed = false;
+    for (i, l) in labels.iter().enumerate() {
+        let c = Pos2::new(rect.left() + 2.0 + w * (i as f32 + 0.5), rect.center().y);
+        let active = i == *sel;
+        p.text(
+            c,
+            Align2::CENTER_CENTER,
+            *l,
+            semibold(12.5),
+            if active { TEXT } else { TEXT_3 },
+        );
+    }
+    if resp.clicked() {
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let i =
+                (((pos.x - rect.left() - 2.0) / w).floor().max(0.0) as usize).min(labels.len() - 1);
+            if i != *sel {
+                *sel = i;
+                changed = true;
+            }
+        }
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    changed
+}
+
+/// Status chip: coloured dot and a short label.
+pub fn chip(ui: &mut egui::Ui, color: Color32, text: &str) {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_string(), body(12.5), TEXT);
+    let size = Vec2::new(galley.size().x + 30.0, 26.0);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, CornerRadius::same(13), RAISED);
+    p.rect_stroke(
+        rect,
+        CornerRadius::same(13),
+        Stroke::new(1.0, HAIRLINE),
+        StrokeKind::Inside,
+    );
+    let dot = Pos2::new(rect.left() + 13.0, rect.center().y);
+    p.circle_filled(dot, 3.5, color);
+    p.galley(
+        Pos2::new(rect.left() + 22.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        TEXT,
+    );
+}
+
+/// "live" indicator that brightens right after a reload.
+pub fn live_dot(ui: &mut egui::Ui, last: Option<Instant>) {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(64.0, 26.0), Sense::hover());
+    let p = ui.painter();
+    let age = last.map(|t| t.elapsed().as_secs_f32()).unwrap_or(99.0);
+    let pulse = (1.0 - (age / 0.9)).clamp(0.0, 1.0);
+    let c = Pos2::new(rect.left() + 8.0, rect.center().y);
+    if pulse > 0.0 {
+        p.circle_filled(c, 3.5 + 5.0 * pulse, ACCENT.gamma_multiply(0.25 * pulse));
+        ui.ctx().request_repaint();
+    }
+    p.circle_filled(c, 3.5, if last.is_some() { ACCENT } else { TEXT_3 });
+    p.text(
+        Pos2::new(rect.left() + 18.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        "live",
+        body(12.5),
+        TEXT_2,
+    );
+    let tip = match last {
+        Some(t) => format!(
+            "Watching the project folder. Last update {:.1} s ago.",
+            t.elapsed().as_secs_f32()
+        ),
+        None => "Waiting for the first load".to_string(),
+    };
+    resp.on_hover_text(tip);
+}
+
+pub fn section_title(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text).font(semibold(13.0)).color(TEXT));
+}
+
+pub fn hairline(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, HAIRLINE);
+}
+
+/// Small borderless text button.
+pub fn text_button(ui: &mut egui::Ui, text: &str) -> bool {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_string(), body(12.0), TEXT_2);
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(galley.size().x + 12.0, 22.0), Sense::click());
+    let p = ui.painter();
+    if resp.hovered() {
+        p.rect_filled(rect, CornerRadius::same(5), HOVER);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let color = if resp.hovered() { TEXT } else { TEXT_2 };
+    p.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        body(12.0),
+        color,
+    );
+    resp.clicked()
+}
+
+/// Accent button. Returns true when clicked and enabled.
+pub fn primary_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::click());
+    let p = ui.painter();
+    let fill = if !enabled {
+        RAISED
+    } else if resp.is_pointer_button_down_on() {
+        Color32::from_rgb(0xC7, 0x77, 0x30)
+    } else if resp.hovered() {
+        Color32::from_rgb(0xEA, 0x98, 0x4E)
+    } else {
+        ACCENT
+    };
+    p.rect_filled(rect, CornerRadius::same(7), fill);
+    if resp.has_focus() {
+        p.rect_stroke(
+            rect.expand(2.0),
+            CornerRadius::same(9),
+            Stroke::new(1.5, ACCENT),
+            StrokeKind::Outside,
+        );
+    }
+    let fg = if enabled {
+        Color32::from_rgb(0x16, 0x10, 0x0A)
+    } else {
+        TEXT_3
+    };
+    p.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        semibold(13.0),
+        fg,
+    );
+    if enabled && resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    enabled && resp.clicked()
+}
+
+/// Layer row: swatch, name, item count, eye. Returns true when toggled.
+pub fn layer_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    color: Color32,
+    count: usize,
+    on: &mut bool,
+) -> bool {
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
+    let p = ui.painter();
+    if resp.hovered() {
+        p.rect_filled(rect, CornerRadius::same(6), HOVER);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let sw = Rect::from_center_size(
+        Pos2::new(rect.left() + 14.0, rect.center().y),
+        Vec2::splat(12.0),
+    );
+    let solid = Color32::from_rgb(color.r(), color.g(), color.b());
+    if *on {
+        p.rect_filled(sw, CornerRadius::same(3), solid);
+    } else {
+        p.rect_stroke(
+            sw,
+            CornerRadius::same(3),
+            Stroke::new(1.5, solid.gamma_multiply(0.6)),
+            StrokeKind::Inside,
+        );
+    }
+    p.text(
+        Pos2::new(rect.left() + 30.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        name,
+        body(13.0),
+        if *on { TEXT } else { TEXT_3 },
+    );
+    if count > 0 {
+        p.text(
+            Pos2::new(rect.right() - 32.0, rect.center().y),
+            Align2::RIGHT_CENTER,
+            count.to_string(),
+            mono(11.0),
+            TEXT_3,
+        );
+    }
+    eye(p, Pos2::new(rect.right() - 14.0, rect.center().y), *on);
+    if resp.clicked() {
+        *on = !*on;
+        return true;
+    }
+    false
+}
+
+fn eye(p: &egui::Painter, c: Pos2, open: bool) {
+    let color = if open { TEXT_2 } else { TEXT_3 };
+    let w = 6.5;
+    let h = if open { 3.6 } else { 0.8 };
+    let pts: Vec<Pos2> = (0..=16)
+        .map(|i| {
+            let t = std::f32::consts::PI * i as f32 / 16.0;
+            Pos2::new(c.x - w * t.cos(), c.y - h * t.sin())
+        })
+        .chain((0..=16).map(|i| {
+            let t = std::f32::consts::PI * i as f32 / 16.0;
+            Pos2::new(c.x + w * t.cos(), c.y + h * t.sin())
+        }))
+        .collect();
+    p.add(egui::Shape::closed_line(pts, Stroke::new(1.2, color)));
+    if open {
+        p.circle_filled(c, 1.8, color);
+    }
+}
+
+/// One rule violation. Returns true when clicked (to zoom to it).
+pub fn violation_row(
+    ui: &mut egui::Ui,
+    color: Color32,
+    rule: &str,
+    message: &str,
+    has_location: bool,
+) -> bool {
+    let width = ui.available_width();
+    let galley = ui
+        .painter()
+        .layout(message.to_string(), body(12.0), TEXT_2, width - 22.0);
+    let h = galley.size().y + 26.0;
+    let sense = if has_location {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, h), sense);
+    let p = ui.painter();
+    if resp.hovered() && has_location {
+        p.rect_filled(rect, CornerRadius::same(6), HOVER);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    p.circle_filled(Pos2::new(rect.left() + 8.0, rect.top() + 12.0), 3.5, color);
+    p.text(
+        Pos2::new(rect.left() + 20.0, rect.top() + 12.0),
+        Align2::LEFT_CENTER,
+        rule.replace('_', " "),
+        semibold(12.5),
+        TEXT,
+    );
+    p.galley(
+        Pos2::new(rect.left() + 20.0, rect.top() + 21.0),
+        galley,
+        TEXT_2,
+    );
+    if has_location {
+        resp.clone().on_hover_text("Show on the board");
+    }
+    resp.clicked()
+}
+
+pub fn note_row(ui: &mut egui::Ui, n: &lamina_model::Note) {
+    let width = ui.available_width();
+    let galley = ui.painter().layout(
+        n.text.clone(),
+        body(12.5),
+        if n.resolved { TEXT_3 } else { TEXT },
+        width - 16.0,
+    );
+    let h = galley.size().y + 30.0;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, h), Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(
+        rect.shrink2(Vec2::new(0.0, 2.0)),
+        CornerRadius::same(7),
+        RAISED,
+    );
+    let who_color = if n.author == "agent" { OK } else { ACCENT };
+    let meta = match (&n.refdes, n.at) {
+        (Some(r), _) => format!(
+            "{} · {}{}",
+            n.author,
+            r,
+            if n.resolved { " · resolved" } else { "" }
+        ),
+        (None, Some(at)) => format!(
+            "{} · {:.1}, {:.1}{}",
+            n.author,
+            at.x,
+            at.y,
+            if n.resolved { " · resolved" } else { "" }
+        ),
+        _ => format!(
+            "{}{}",
+            n.author,
+            if n.resolved { " · resolved" } else { "" }
+        ),
+    };
+    p.circle_filled(
+        Pos2::new(rect.left() + 12.0, rect.top() + 14.0),
+        3.0,
+        who_color,
+    );
+    p.text(
+        Pos2::new(rect.left() + 21.0, rect.top() + 14.0),
+        Align2::LEFT_CENTER,
+        meta,
+        body(11.5),
+        TEXT_3,
+    );
+    p.text(
+        Pos2::new(rect.right() - 10.0, rect.top() + 14.0),
+        Align2::RIGHT_CENTER,
+        &n.id,
+        mono(11.0),
+        TEXT_3,
+    );
+    p.galley(
+        Pos2::new(rect.left() + 10.0, rect.top() + 23.0),
+        galley,
+        TEXT,
+    );
+}
+
+/// Quiet hint along the bottom of the canvas.
+pub fn hint(p: &egui::Painter, rect: Rect, text: &str) {
+    p.text(
+        Pos2::new(rect.center().x, rect.bottom() - 16.0),
+        Align2::CENTER_CENTER,
+        text,
+        body(12.0),
+        TEXT_3,
+    );
+}

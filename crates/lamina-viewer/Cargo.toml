@@ -7,7 +7,14 @@ rust-version.workspace = true
 description = "Live 2D/3D viewer for Lamina projects"
 
 [dependencies]
+lamina-model.workspace = true
+lamina-geom.workspace = true
+lamina-drc.workspace = true
+lamina-scene.workspace = true
+lamina-render.workspace = true
+serde_json.workspace = true
 eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "wgpu", "accesskit"] }
+notify = "8"
 
 [lints]
 workspace = true

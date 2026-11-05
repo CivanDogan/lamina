@@ -114,6 +114,8 @@ impl SceneLayer {
 pub struct LayerDraw {
     pub layer: SceneLayer,
     pub items: Vec<Geom>,
+    /// The first `pour` items are copper pour fills.
+    pub pour: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +141,7 @@ fn push(layers: &mut Vec<LayerDraw>, l: SceneLayer, g: Geom) {
         None => layers.push(LayerDraw {
             layer: l,
             items: vec![g],
+            pour: 0,
         }),
     }
 }

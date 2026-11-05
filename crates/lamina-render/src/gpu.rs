@@ -469,27 +469,39 @@ impl Gpu {
 
     /// Upload 2D layers. Each layer gets its own depth so overlaps inside a
     /// layer blend once.
-    pub fn upload_2d(&self, s: &Scene2D, px_per_mm: f64) -> Gpu2D {
+    pub fn upload_2d(&self, s: &Scene2D, px_per_mm: f64, active_copper: u8) -> Gpu2D {
         let mut verts: Vec<V2> = Vec::new();
         let mut idx: Vec<u32> = Vec::new();
         let mut ranges = Vec::new();
         let n = s.layers.len().max(1) as f32;
         for (li, l) in s.layers.iter().enumerate() {
-            let mut tris = Tris::default();
-            for g in &l.items {
-                tris.add(g, px_per_mm);
-            }
-            let color = rgba_lin(theme::layer_color(l.layer, s.copper_layers));
+            let base_color = rgba_lin(theme::layer_color(l.layer, s.copper_layers));
+            // Copper away from the active layer recedes.
+            let layer_k = match l.layer {
+                SceneLayer::Copper(i) if i != active_copper => 0.38,
+                _ => 1.0,
+            };
             let depth = 0.9 - 0.8 * (li as f32 / n);
-            let base = verts.len() as u32;
-            verts.extend(tris.pos.iter().map(|p| V2 {
-                pos: *p,
-                color,
-                depth,
-            }));
             let start = idx.len() as u32;
-            idx.extend(tris.idx.iter().map(|i| base + i));
-            ranges.push((l.layer, start, tris.idx.len() as u32));
+            // Pours draw in their own depth slot just below the layer's
+            // pads and tracks, and lighter.
+            for (part, items, k) in [(0, &l.items[..l.pour], 0.42), (1, &l.items[l.pour..], 1.0)] {
+                let mut tris = Tris::default();
+                for g in items {
+                    tris.add(g, px_per_mm);
+                }
+                let mut color = base_color;
+                color[3] *= k * layer_k;
+                let d = depth + if part == 0 { 0.4 / n } else { 0.0 };
+                let base = verts.len() as u32;
+                verts.extend(tris.pos.iter().map(|p| V2 {
+                    pos: *p,
+                    color,
+                    depth: d,
+                }));
+                idx.extend(tris.idx.iter().map(|i| base + i));
+            }
+            ranges.push((l.layer, start, idx.len() as u32 - start));
         }
         if verts.is_empty() {
             verts.push(V2 {
