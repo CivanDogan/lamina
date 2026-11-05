@@ -29,6 +29,15 @@ pub struct Status {
     pub warnings: usize,
     /// Count of violations per rule.
     pub by_rule: BTreeMap<String, usize>,
+    /// Design source file, when the board is built from one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Files generated from the source; edit the source, not these.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub generated: Vec<String>,
+    /// Workspace root, when the board belongs to one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 impl Project {
@@ -70,6 +79,14 @@ impl Project {
             errors,
             warnings: v.len() - errors,
             by_rule,
+            source: lamina_build::has_source(self.root())
+                .then(|| lamina_build::SOURCE_FILE.to_string()),
+            generated: self
+                .source_owned()
+                .iter()
+                .map(|k| k.file_name().to_string())
+                .collect(),
+            workspace: Workspace::find(self.root()).map(|w| w.root.display().to_string()),
         }
     }
 }

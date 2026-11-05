@@ -11,6 +11,7 @@ pub mod geom;
 pub mod json;
 pub mod layer;
 pub mod project;
+pub mod workspace;
 
 pub use error::Error;
 pub use files::*;
@@ -18,6 +19,7 @@ pub use footprint::*;
 pub use geom::*;
 pub use layer::*;
 pub use project::*;
+pub use workspace::*;
 
 /// JSON schema of a project file kind, for agents to read.
 pub fn schema_for(kind: &str) -> Option<serde_json::Value> {

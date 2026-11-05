@@ -20,6 +20,8 @@ pub struct Loaded {
     pub changed: Vec<Rect>,
     /// Model files that changed on disk.
     pub models_changed: bool,
+    /// Files generated from `design.jsonnet`, which the editor leaves alone.
+    pub generated: Vec<String>,
 }
 
 pub enum Msg {
@@ -55,11 +57,9 @@ impl Live {
                 if relevant.is_empty() {
                     return;
                 }
-                let models = relevant.iter().any(|p| {
-                    p.to_string_lossy()
-                        .replace('\\', "/")
-                        .contains("cache/models")
-                });
+                let models = relevant
+                    .iter()
+                    .any(|p| p.components().any(|c| c.as_os_str() == "models"));
                 let _ = ev_tx.send((true, models));
             }
         })
@@ -67,6 +67,14 @@ impl Live {
         watcher
             .watch(&root, RecursiveMode::Recursive)
             .map_err(|e| format!("cannot watch {}: {e}", root.display()))?;
+        // Shared libraries: blocks, footprints and models the board imports.
+        if let Some(ws) = lamina_model::Workspace::find(&root) {
+            for lib in ws.lib_dirs() {
+                if lib.is_dir() && !lib.starts_with(&root) {
+                    let _ = watcher.watch(&lib, RecursiveMode::Recursive);
+                }
+            }
+        }
         let (tx, rx) = channel();
         std::thread::Builder::new()
             .name("lamina-live".into())
@@ -113,6 +121,12 @@ fn worker(root: PathBuf, ev: Receiver<(bool, bool)>, tx: Sender<Msg>, wake: impl
 }
 
 fn build(root: &Path, prev: Option<&ProjectData>, models_changed: bool) -> Result<Loaded, String> {
+    // A changed design source is built first; its errors read like compile errors.
+    lamina_build::ensure_built(root).map_err(|e| e.to_string())?;
+    let generated: Vec<String> = lamina_build::owned(root)
+        .iter()
+        .map(|k| k.file_name().to_string())
+        .collect();
     let mut last = String::new();
     for _ in 0..5 {
         match ProjectData::load(root) {
@@ -127,6 +141,7 @@ fn build(root: &Path, prev: Option<&ProjectData>, models_changed: bool) -> Resul
                     took: Duration::ZERO,
                     changed,
                     models_changed,
+                    generated,
                 });
             }
             Err(e) => {

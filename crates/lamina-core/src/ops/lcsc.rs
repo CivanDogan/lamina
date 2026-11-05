@@ -209,7 +209,27 @@ impl Project {
             pads.join(" ")
         );
 
-        if let Some(r) = p.refdes {
+        let parts_generated = lamina_build::owned(self.root()).contains(&FileKind::Parts);
+        if let (Some(r), true) = (p.refdes.as_deref(), parts_generated) {
+            let q = |s: &str| s.replace('\\', "\\\\").replace('\'', "\\'");
+            let mut fields = vec![format!("footprint: '{}'", q(&fp_id))];
+            if let Some(v) = p.value.as_deref().or(meta.mpn.as_deref()) {
+                fields.push(format!("value: '{}'", q(v)));
+            }
+            if let Some(m) = &meta.mpn {
+                fields.push(format!("mpn: '{}'", q(m)));
+            }
+            if let Some(m) = &meta.manufacturer {
+                fields.push(format!("manufacturer: '{}'", q(m)));
+            }
+            fields.push(format!("lcsc: '{lcsc}'"));
+            notes.push(format!(
+                "parts.json is generated from {}; add the part there: {r}: {{ {} }}",
+                lamina_build::SOURCE_FILE,
+                fields.join(", ")
+            ));
+            summary = format!("{r} not added (see notes): {summary}");
+        } else if let Some(r) = p.refdes {
             if !valid_refdes(&r) {
                 return Err(Error::invalid(format!("bad refdes `{r}`")));
             }

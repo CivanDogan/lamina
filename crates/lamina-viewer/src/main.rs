@@ -668,6 +668,9 @@ impl App {
                 let unrouted = l.analysis.ratsnest.len();
                 widgets::live_dot(ui, self.last_reload);
                 ui.add_space(6.0);
+                if !l.generated.is_empty() {
+                    widgets::chip(ui, TEXT_2, "design.jsonnet");
+                }
                 widgets::chip(
                     ui,
                     if unrouted == 0 { OK } else { TEXT_2 },

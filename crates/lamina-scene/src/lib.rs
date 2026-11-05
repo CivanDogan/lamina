@@ -669,7 +669,8 @@ pub fn build_3d(d: &ProjectData, root: &Path) -> Scene3D {
         let place = placement_matrix(pl, t);
         let (model, m) = match &fp.model {
             Some(mr) => {
-                let path = root.join(MODEL_DIR).join(&mr.file);
+                let path = lamina_model::find_model(root, &mr.file)
+                    .unwrap_or_else(|| root.join(MODEL_DIR).join(&mr.file));
                 let local = mat_mul(
                     &translate(
                         mr.offset[0] as f32,

@@ -31,6 +31,17 @@ enum Cmd {
         dir: PathBuf,
         #[arg(long)]
         name: Option<String>,
+        /// Start from a modular design.jsonnet source.
+        #[arg(long)]
+        modular: bool,
+    },
+    /// Build a board's design.jsonnet into its JSON files.
+    Build { dir: PathBuf },
+    /// Create a workspace (lamina.json with a lib folder) in a folder.
+    Workspace {
+        dir: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Print project status as JSON.
     Status { dir: PathBuf },
@@ -47,22 +58,41 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Mcp { project } => run_mcp(project),
-        Cmd::New { dir, name } => {
+        Cmd::New { dir, name, modular } => {
             let path = dir.to_string_lossy().to_string();
             if lamina_core::model::ProjectData::is_project(&dir) {
                 anyhow::bail!("{path} already contains a project");
             }
-            let p = server::open_project(&path, true, name)?;
+            let p = server::open_project(&path, true, name, modular)?;
+            if let Some(mut ws) = lamina_core::model::Workspace::find(&dir) {
+                ws.add_board(&dir)?;
+            }
             println!("{}", serde_json::to_string_pretty(&p.status())?);
             Ok(())
         }
+        Cmd::Build { dir } => {
+            let mut p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
+            println!("{}", serde_json::to_string_pretty(&p.build()?)?);
+            Ok(())
+        }
+        Cmd::Workspace { dir, name } => {
+            let name = name.unwrap_or_else(|| {
+                dir.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("workspace")
+                    .to_string()
+            });
+            let ws = lamina_core::model::Workspace::create(&dir, &name)?;
+            println!("{}", serde_json::to_string_pretty(&ws.file)?);
+            Ok(())
+        }
         Cmd::Status { dir } => {
-            let p = server::open_project(&dir.to_string_lossy(), false, None)?;
+            let p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
             println!("{}", serde_json::to_string_pretty(&p.status())?);
             Ok(())
         }
         Cmd::Check { dir } => {
-            let p = server::open_project(&dir.to_string_lossy(), false, None)?;
+            let p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
             println!("{}", serde_json::to_string_pretty(&p.check())?);
             Ok(())
         }
@@ -77,7 +107,12 @@ fn main() -> anyhow::Result<()> {
 
 fn run_mcp(project: Option<PathBuf>) -> anyhow::Result<()> {
     let initial = match project {
-        Some(dir) => Some(server::open_project(&dir.to_string_lossy(), false, None)?),
+        Some(dir) => Some(server::open_project(
+            &dir.to_string_lossy(),
+            false,
+            None,
+            false,
+        )?),
         None => None,
     };
     let rt = tokio::runtime::Builder::new_current_thread()

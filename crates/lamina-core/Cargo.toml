@@ -17,6 +17,7 @@ lamina-scene.workspace = true
 lamina-render.workspace = true
 lamina-export.workspace = true
 lamina-step.workspace = true
+lamina-build.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true

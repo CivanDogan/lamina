@@ -304,3 +304,50 @@ overrides, fiducials, modules with antenna keep-outs.
 ## 8. Open
 
 - Whether to publish on crates.io at all.
+
+## 9. Modular sources and workspaces (2026-11-05)
+
+The user asked for modularity in the "A in one file, B in another, C = A + B
+in a third" sense, for projects with many boards.
+
+**Decision: Jsonnet sources, JSON layout.** Jsonnet is a superset of JSON
+with variables, functions, `import` and object merging, and it has a
+Rust implementation (jrsonnet) so nothing leaves Rust. Considered and
+dropped: YAML (no imports or expressions, would need a dialect), CUE and
+Pkl (not Rust), Nickel (Rust, but too little known for agents to write
+reliably), Starlark (the one real alternative; Python syntax, but the
+board becomes a program you must run to read).
+
+**The split.** Formulas cannot be edited backwards, so a built board has
+two kinds of files:
+
+- *Design source* `design.jsonnet`: parts, nets, board (outline, holes,
+  stackup, rules). Edited as text by the user or the agent. It evaluates
+  to an object with any of the keys `board`, `parts`, `nets`; each key
+  present makes that file generated ("owned") by the source.
+- *Layout* `placement.json`, `routing.json`, `notes.json`: edited in the
+  viewer and over MCP exactly as before.
+
+`lamina build` evaluates the source into the usual JSON. The engine, DRC,
+router, renderer, exporter and viewer do not change. Edits to an owned
+file are refused with a pointer to the source. The MCP server and the
+viewer rebuild automatically when the source or any imported file
+changes (`cache/build.json` records inputs and their hashes). Parts that
+disappear from the source lose their placement.
+
+**Workspaces.** `lamina.json` above the board folders lists `boards` and
+`lib` folders. Each lib folder is a Jsonnet import path and may hold
+shared `footprints/` and `models/`; a board's own cache wins over the
+libraries. `import 'lamina.libsonnet'` is built in and provides `merge`
+(parts must be unique, nets with the same name join their pads), `net`,
+`pads`, `rect`, `hole` and `corner_holes`.
+
+**Blocks** are plain Jsonnet functions returning fragments
+`{parts, nets}`; the caller passes a name prefix and the external net
+names. Layout reuse (a block placed and routed once, dropped onto the
+board several times as a group) is the natural next step and is not in
+this change.
+
+**Compatibility** with other PCB tools (KiCad, EasyEDA, Gerber, ODB++,
+IPC-2581, Specctra, STEP) is unaffected by this choice: import and
+export happen at the JSON level and are a separate piece of work.

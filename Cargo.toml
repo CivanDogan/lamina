@@ -20,6 +20,7 @@ lamina-export = { path = "crates/lamina-export" }
 lamina-scene = { path = "crates/lamina-scene" }
 lamina-render = { path = "crates/lamina-render" }
 lamina-core = { path = "crates/lamina-core" }
+lamina-build = { path = "crates/lamina-build" }
 
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
@@ -39,6 +40,12 @@ bytemuck = { version = "1.25.2", features = ["derive"] }
 pollster = "1.0.1"
 earcutr = "0.5.0"
 glam = { version = "0.34.2", features = ["bytemuck"] }
+jrsonnet-evaluator = { version = "0.5.0-pre98", default-features = false, features = ["ir-parser", "explaining-traces"] }
+jrsonnet-stdlib = "0.5.0-pre98"
+
+[patch.crates-io]
+# See vendor/jrsonnet-stdlib/Cargo.toml.
+jrsonnet-stdlib = { path = "vendor/jrsonnet-stdlib" }
 
 [profile.dev.package."*"]
 opt-level = 1

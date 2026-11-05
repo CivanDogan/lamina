@@ -75,7 +75,7 @@ impl std::fmt::Debug for Project {
     }
 }
 
-const PROJECT_GITIGNORE: &str = "cache/render/\n.lamina.lock\n*.tmp\n";
+const PROJECT_GITIGNORE: &str = "cache/render/\ncache/build.json\n.lamina.lock\n*.tmp\n*.mesh\n";
 
 impl Project {
     /// Create a new project in `dir`, which must not contain a project.
@@ -120,6 +120,7 @@ impl Project {
     /// Open without taking the lock. The viewer edits this way next to an
     /// agent; both sides call [`Project::sync`] before each change.
     pub fn open_shared(dir: &Path) -> Result<Project> {
+        lamina_build::ensure_built(dir)?;
         let stamp = disk_stamp(dir);
         let data = ProjectData::load(dir)?;
         Ok(Project {
@@ -136,8 +137,9 @@ impl Project {
     /// Reload when the files changed on disk since the last load or save.
     /// Returns whether anything was reloaded.
     pub fn sync(&mut self) -> Result<bool> {
+        let built = lamina_build::ensure_built(&self.root)?.is_some();
         let now = disk_stamp(&self.root);
-        if now == self.stamp {
+        if now == self.stamp && !built {
             return Ok(false);
         }
         self.data = ProjectData::load(&self.root)?;
@@ -191,6 +193,7 @@ impl Project {
 
     /// Re-read everything from disk (for example after the user edited files).
     pub fn reload(&mut self) -> Result<()> {
+        lamina_build::ensure_built(&self.root)?;
         self.stamp = disk_stamp(&self.root);
         self.data = ProjectData::load(&self.root)?;
         self.cached = None;
@@ -233,6 +236,21 @@ impl Project {
                 )));
             }
         }
+        let owned = lamina_build::owned(&self.root);
+        let clash: Vec<&str> = touched
+            .files
+            .iter()
+            .filter(|k| owned.contains(k))
+            .map(|k| k.file_name())
+            .collect();
+        if !clash.is_empty() {
+            return Err(Error::Refused(format!(
+                "{} {} generated from {}; change the source instead, it is rebuilt automatically",
+                clash.join(" and "),
+                if clash.len() == 1 { "is" } else { "are" },
+                lamina_build::SOURCE_FILE
+            )));
+        }
         let fixed: Vec<String> = before
             .iter()
             .filter(|v| !after_keys.contains(&v.key()))
@@ -268,6 +286,31 @@ impl Project {
             warnings,
             notes: Vec::new(),
         })
+    }
+
+    /// Build the design source and reload.
+    pub fn build(&mut self) -> Result<lamina_build::Report> {
+        let r = lamina_build::build(&self.root)?;
+        self.reload()?;
+        Ok(r)
+    }
+
+    /// Write a starter `design.jsonnet` for a new board (when none exists)
+    /// and build it.
+    pub fn init_source(&mut self) -> Result<lamina_build::Report> {
+        let src = lamina_build::source_path(&self.root);
+        if !src.is_file() {
+            write_atomic(
+                &src,
+                lamina_build::template(&self.data.board.name).as_bytes(),
+            )?;
+        }
+        self.build()
+    }
+
+    /// Files generated from the design source, which direct edits may not touch.
+    pub fn source_owned(&self) -> BTreeSet<FileKind> {
+        lamina_build::owned(&self.root)
     }
 
     /// Make `new` the project state, writing only the files that differ.

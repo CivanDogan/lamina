@@ -24,6 +24,8 @@ Conventions: millimetres, Y up, rotation in degrees counter-clockwise, fixed ori
 others `top.silk`, `top.mask`, `top.paste`, `top.courtyard`, `top.fab`, `bottom.*`, \
 `outline`. Pads are referenced as `REFDES.PAD`, e.g. `U1.3`.
 
+A board may be modular: `design.jsonnet` (Jsonnet = JSON plus variables, functions and `import`) generates board.json, parts.json and nets.json. Those files are then read-only for the tools; edit the source as text and it is rebuilt before the next tool call. Shared blocks live in the workspace `lib` folders (see `lamina.json`) and `import 'lamina.libsonnet'` gives `merge`, `net`, `pads`, `rect`, `hole` and `corner_holes`. Placement and routing stay plain JSON and are edited with the tools as usual.
+
 Every change is applied and its new rule violations are reported. Pass `strict: true` \
 to refuse a change that would add an error instead. Malformed input is always refused. \
 Start with `open` (create: true for a new project), then `status`.";
@@ -46,6 +48,10 @@ pub struct OpenParams {
     /// Board name for a new project (defaults to the folder name).
     #[serde(default)]
     pub name: Option<String>,
+    /// With `create`: start the board from a modular `design.jsonnet`
+    /// source instead of plain JSON files.
+    #[serde(default)]
+    pub modular: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -116,6 +122,7 @@ pub fn open_project(
     path: &str,
     create: bool,
     name: Option<String>,
+    modular: bool,
 ) -> lamina_core::Result<Project> {
     let dir = PathBuf::from(path);
     if model::ProjectData::is_project(&dir) {
@@ -134,6 +141,9 @@ pub fn open_project(
     });
     let mut p = Project::create(&dir, &name)?;
     crate::register_checkers(&mut p);
+    if modular {
+        p.init_source()?;
+    }
     Ok(p)
 }
 
@@ -149,7 +159,7 @@ impl Lamina {
         let mut guard = self.project.lock().unwrap_or_else(|p| p.into_inner());
         // Release the previous project's lock first.
         *guard = None;
-        match open_project(&p.path, p.create, p.name) {
+        match open_project(&p.path, p.create, p.name, p.modular) {
             Ok(proj) => {
                 let s = proj.status();
                 *guard = Some(proj);
@@ -164,6 +174,15 @@ impl Lamina {
     #[tool(annotations(title = "Project status", read_only_hint = true))]
     async fn status(&self) -> Result<CallToolResult, McpError> {
         self.with(|p| Ok(p.status()))
+    }
+
+    /// Build `design.jsonnet` into board.json, parts.json and nets.json and
+    /// reload. Every tool also rebuilds automatically when the source or an
+    /// imported file changed, so call this to force a build or to see the
+    /// report (added and removed parts, warnings).
+    #[tool(annotations(title = "Build design source"))]
+    async fn build(&self) -> Result<CallToolResult, McpError> {
+        self.with(|p| p.build())
     }
 
     /// Re-read all files from disk, for example after editing JSON by hand.

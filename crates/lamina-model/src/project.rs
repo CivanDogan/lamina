@@ -103,8 +103,11 @@ impl ProjectData {
             return Err(Error::NotAProject(dir.to_path_buf()));
         }
         let mut footprints = BTreeMap::new();
-        let fp_dir = dir.join(FOOTPRINT_DIR);
-        if fp_dir.is_dir() {
+        // The board's own cache wins over workspace libraries.
+        for fp_dir in crate::workspace::footprint_dirs(dir).into_iter().rev() {
+            if !fp_dir.is_dir() {
+                continue;
+            }
             let mut entries: Vec<PathBuf> = fs::read_dir(&fp_dir)
                 .map_err(|e| Error::io(&fp_dir, e))?
                 .filter_map(|e| e.ok().map(|e| e.path()))
