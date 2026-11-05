@@ -4,8 +4,22 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+description = "2D and 3D rendering for Lamina"
 
 [dependencies]
+lamina-model.workspace = true
+lamina-scene.workspace = true
+lamina-step.workspace = true
+tiny-skia.workspace = true
+wgpu.workspace = true
+bytemuck.workspace = true
+pollster.workspace = true
+earcutr.workspace = true
+glam.workspace = true
+
+[dev-dependencies]
+lamina-footprint.workspace = true
+lamina-drc.workspace = true
 
 [lints]
 workspace = true

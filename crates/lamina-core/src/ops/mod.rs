@@ -3,6 +3,7 @@ pub mod lcsc;
 pub mod nets;
 pub mod parts;
 pub mod place;
+pub mod render;
 pub mod route;
 pub mod status;
 
@@ -17,6 +18,7 @@ pub use place::{
     Align, Axis, Distribute, FlipPart, Measure, Measurement, MoveParts, Place, PlaceMany,
     RotatePart, Target, Unplace,
 };
+pub use render::{Render, RenderView, Rendered, parse_scene_layer};
 pub use route::{
     AddHole, AddKeepout, AddText, AddVia, AddZone, Autoroute, DeleteItems, Ripup, RouteTrace,
 };

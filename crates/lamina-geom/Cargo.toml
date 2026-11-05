@@ -9,7 +9,7 @@ description = "Copper geometry, distances and polygon operations for Lamina"
 [dependencies]
 lamina-model.workspace = true
 serde.workspace = true
-geo = "0.33.1"
+geo.workspace = true
 rstar = "0.14.0"
 
 [lints]

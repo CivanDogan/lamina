@@ -4,8 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+description = "Draw lists for Lamina's renderers"
 
 [dependencies]
+lamina-model.workspace = true
+lamina-geom.workspace = true
+lamina-drc.workspace = true
+geo.workspace = true
+
+[dev-dependencies]
+lamina-footprint.workspace = true
 
 [lints]
 workspace = true

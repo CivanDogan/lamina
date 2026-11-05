@@ -523,6 +523,30 @@ impl Lamina {
     async fn ratsnest(&self) -> Result<CallToolResult, McpError> {
         self.with(|proj| Ok(proj.ratsnest()))
     }
+    /// Render the board to PNG and return it as an image. Views: `layers`
+    /// (technical, pick layers), `top` / `bottom` (finished board), `3d`
+    /// (perspective with part models; set yaw and pitch). Saved in cache/render.
+    #[tool(annotations(title = "Render", read_only_hint = true))]
+    async fn render(&self, Parameters(p): Parameters<Render>) -> Result<CallToolResult, McpError> {
+        let mut guard = self.project.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(proj) = guard.as_mut() else {
+            return Ok(error_result(
+                "no project is open; call `open` with a folder path first",
+            ));
+        };
+        match proj.render(p) {
+            Ok(r) => {
+                use base64::Engine;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&r.png);
+                let meta = serde_json::to_string(&r).unwrap_or_default();
+                Ok(CallToolResult::success(vec![
+                    ContentBlock::image(b64, "image/png"),
+                    ContentBlock::text(meta),
+                ]))
+            }
+            Err(e) => Ok(error_result(e)),
+        }
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
