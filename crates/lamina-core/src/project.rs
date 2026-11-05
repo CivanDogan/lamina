@@ -1,0 +1,221 @@
+//! An open project and the commit step every operation goes through.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+use lamina_model::*;
+use schemars::JsonSchema;
+use serde::Serialize;
+
+use crate::lock::Lock;
+
+/// What an operation did. Returned as JSON to the agent.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct OpResult {
+    pub summary: String,
+    /// Files written.
+    pub changed: Vec<String>,
+    /// Violations this change introduced.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub new_violations: Vec<Violation>,
+    /// Violations this change fixed (rule and items only).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fixed: Vec<String>,
+    /// Total errors and warnings now on the board.
+    pub errors: usize,
+    pub warnings: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// Files touched by a change.
+#[derive(Debug, Default, Clone)]
+pub struct Touched {
+    pub files: BTreeSet<FileKind>,
+    pub footprints: BTreeSet<String>,
+    pub removed_footprints: BTreeSet<String>,
+}
+
+impl Touched {
+    pub fn file(k: FileKind) -> Self {
+        let mut t = Touched::default();
+        t.files.insert(k);
+        t
+    }
+
+    pub fn and(mut self, k: FileKind) -> Self {
+        self.files.insert(k);
+        self
+    }
+
+    pub fn footprint(mut self, id: impl Into<String>) -> Self {
+        self.footprints.insert(id.into());
+        self
+    }
+}
+
+pub type Checker = fn(&ProjectData) -> Vec<Violation>;
+
+pub struct Project {
+    root: PathBuf,
+    pub data: ProjectData,
+    checkers: Vec<Checker>,
+    _lock: Lock,
+}
+
+impl std::fmt::Debug for Project {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Project").field("root", &self.root).finish()
+    }
+}
+
+const PROJECT_GITIGNORE: &str = "cache/render/\n.lamina.lock\n*.tmp\n";
+
+impl Project {
+    /// Create a new project in `dir`, which must not contain a project.
+    pub fn create(dir: &Path, name: &str) -> Result<Project> {
+        if ProjectData::is_project(dir) {
+            return Err(Error::invalid(format!(
+                "{} already contains a project",
+                dir.display()
+            )));
+        }
+        std::fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
+        let lock = Lock::acquire(dir)?;
+        let data = ProjectData::new(name);
+        data.save_all(dir)?;
+        for sub in [FOOTPRINT_DIR, MODEL_DIR, PARTS_DIR] {
+            let p = dir.join(sub);
+            std::fs::create_dir_all(&p).map_err(|e| Error::io(&p, e))?;
+        }
+        let gi = dir.join(".gitignore");
+        if !gi.exists() {
+            write_atomic(&gi, PROJECT_GITIGNORE.as_bytes())?;
+        }
+        Ok(Project {
+            root: dir.to_path_buf(),
+            data,
+            checkers: Vec::new(),
+            _lock: lock,
+        })
+    }
+
+    pub fn open(dir: &Path) -> Result<Project> {
+        let data = ProjectData::load(dir)?;
+        let lock = Lock::acquire(dir)?;
+        Ok(Project {
+            root: dir.to_path_buf(),
+            data,
+            checkers: Vec::new(),
+            _lock: lock,
+        })
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Add a checker that runs after every change (DRC registers here).
+    pub fn add_checker(&mut self, c: Checker) {
+        self.checkers.push(c);
+    }
+
+    /// All current violations.
+    pub fn check(&self) -> Vec<Violation> {
+        self.check_data(&self.data)
+    }
+
+    fn check_data(&self, d: &ProjectData) -> Vec<Violation> {
+        let mut v = crate::validate::validate(d);
+        for c in &self.checkers {
+            v.extend(c(d));
+        }
+        v
+    }
+
+    /// Re-read everything from disk (for example after the user edited files).
+    pub fn reload(&mut self) -> Result<()> {
+        self.data = ProjectData::load(&self.root)?;
+        Ok(())
+    }
+
+    /// Apply `new` as the project state, write the touched files and
+    /// report. With `strict`, refuse when the change adds an error.
+    pub fn commit(
+        &mut self,
+        new: ProjectData,
+        touched: Touched,
+        strict: bool,
+        summary: impl Into<String>,
+    ) -> Result<OpResult> {
+        let before = self.check_data(&self.data);
+        let after = self.check_data(&new);
+        let before_keys: BTreeSet<String> = before.iter().map(|v| v.key()).collect();
+        let after_keys: BTreeSet<String> = after.iter().map(|v| v.key()).collect();
+        let new_violations: Vec<Violation> = after
+            .iter()
+            .filter(|v| !before_keys.contains(&v.key()))
+            .cloned()
+            .collect();
+        if strict {
+            let errs: Vec<&Violation> = new_violations
+                .iter()
+                .filter(|v| v.severity == Severity::Error)
+                .collect();
+            if !errs.is_empty() {
+                let list: Vec<String> = errs
+                    .iter()
+                    .take(10)
+                    .map(|v| format!("{}: {}", v.rule, v.message))
+                    .collect();
+                return Err(Error::Refused(format!(
+                    "strict: change would add {} error(s): {}",
+                    errs.len(),
+                    list.join("; ")
+                )));
+            }
+        }
+        let fixed: Vec<String> = before
+            .iter()
+            .filter(|v| !after_keys.contains(&v.key()))
+            .map(|v| format!("{}: {}", v.rule, v.message))
+            .collect();
+
+        for id in &touched.removed_footprints {
+            ProjectData::remove_footprint_file(&self.root, id)?;
+        }
+        self.data = new;
+        let mut changed = Vec::new();
+        for id in &touched.footprints {
+            self.data.save_footprint(&self.root, id)?;
+            changed.push(format!("{FOOTPRINT_DIR}/{id}.json"));
+        }
+        for k in &touched.files {
+            self.data.save(&self.root, *k)?;
+            changed.push(k.file_name().to_string());
+        }
+        let errors = after
+            .iter()
+            .filter(|v| v.severity == Severity::Error)
+            .count();
+        Ok(OpResult {
+            summary: summary.into(),
+            changed,
+            new_violations,
+            fixed,
+            errors,
+            warnings: after.len() - errors,
+            notes: Vec::new(),
+        })
+    }
+}
+
+/// Next free id like `t12` given existing ids with the same prefix.
+pub fn next_id<'a>(prefix: &str, existing: impl IntoIterator<Item = &'a str>) -> String {
+    let max = existing
+        .into_iter()
+        .filter_map(|s| s.strip_prefix(prefix)?.parse::<u64>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("{prefix}{}", max + 1)
+}

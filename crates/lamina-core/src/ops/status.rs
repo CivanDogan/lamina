@@ -1,0 +1,75 @@
+use std::collections::BTreeMap;
+
+use lamina_model::*;
+use schemars::JsonSchema;
+use serde::Serialize;
+
+use crate::project::Project;
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct Status {
+    pub name: String,
+    pub path: String,
+    /// Outline bounding box, when set.
+    pub outline: Option<Rect>,
+    pub copper_layers: u8,
+    pub thickness: f64,
+    pub parts: usize,
+    pub placed: usize,
+    /// Parts without a placement.
+    pub unplaced: Vec<String>,
+    pub footprints: usize,
+    pub nets: usize,
+    pub tracks: usize,
+    pub vias: usize,
+    pub zones: usize,
+    pub keepouts: usize,
+    pub open_notes: usize,
+    pub errors: usize,
+    pub warnings: usize,
+    /// Count of violations per rule.
+    pub by_rule: BTreeMap<String, usize>,
+}
+
+impl Project {
+    pub fn status(&self) -> Status {
+        let d = &self.data;
+        let v = self.check();
+        let errors = v.iter().filter(|x| x.severity == Severity::Error).count();
+        let mut by_rule = BTreeMap::new();
+        for x in &v {
+            *by_rule.entry(x.rule.clone()).or_insert(0) += 1;
+        }
+        Status {
+            name: d.board.name.clone(),
+            path: self.root().display().to_string(),
+            outline: d.board.outline.as_ref().and_then(|c| c.bbox()),
+            copper_layers: d.board.stackup.copper_layers,
+            thickness: d.board.stackup.thickness,
+            parts: d.parts.parts.len(),
+            placed: d
+                .parts
+                .parts
+                .keys()
+                .filter(|r| d.placement.placements.contains_key(*r))
+                .count(),
+            unplaced: d
+                .parts
+                .parts
+                .keys()
+                .filter(|r| !d.placement.placements.contains_key(*r))
+                .cloned()
+                .collect(),
+            footprints: d.footprints.len(),
+            nets: d.nets.nets.len(),
+            tracks: d.routing.tracks.len(),
+            vias: d.routing.vias.len(),
+            zones: d.routing.zones.len(),
+            keepouts: d.routing.keepouts.len(),
+            open_notes: d.notes.notes.iter().filter(|n| !n.resolved).count(),
+            errors,
+            warnings: v.len() - errors,
+            by_rule,
+        }
+    }
+}

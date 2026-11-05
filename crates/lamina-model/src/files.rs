@@ -1,0 +1,721 @@
+//! The project files: board, parts, nets, placement, routing, notes.
+
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::fmt;
+use std::str::FromStr;
+
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::footprint::{Drill, Forbid};
+use crate::geom::{Contour, Point, Shape};
+use crate::layer::{Layer, Side};
+
+pub const SCHEMA: u32 = 1;
+
+fn schema_v() -> u32 {
+    SCHEMA
+}
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
+}
+
+// ---------------------------------------------------------------- board.json
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BoardFile {
+    #[serde(default = "schema_v")]
+    pub schema: u32,
+    pub name: String,
+    /// Board edge. `None` until set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<Contour>,
+    /// Internal cut-outs through the board.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cutouts: Vec<Contour>,
+    /// Mechanical holes not belonging to a part.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holes: Vec<Hole>,
+    pub stackup: Stackup,
+    pub rules: Rules,
+}
+
+impl BoardFile {
+    pub fn new(name: impl Into<String>) -> Self {
+        BoardFile {
+            schema: SCHEMA,
+            name: name.into(),
+            outline: None,
+            cutouts: Vec::new(),
+            holes: Vec::new(),
+            stackup: Stackup::default(),
+            rules: Rules::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Hole {
+    pub id: String,
+    pub at: Point,
+    pub drill: Drill,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub plated: bool,
+    /// Copper ring diameter for plated holes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pad_diameter: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Stackup {
+    /// 1, or an even number from 2 to 32.
+    pub copper_layers: u8,
+    /// Finished board thickness in mm.
+    pub thickness: f64,
+    /// Outer copper weight in oz.
+    #[serde(default = "one")]
+    pub outer_copper_oz: f64,
+    /// Inner copper weight in oz.
+    #[serde(default = "half")]
+    pub inner_copper_oz: f64,
+    /// Surface finish, for example `HASL`, `LeadFree HASL`, `ENIG`.
+    #[serde(default = "default_finish")]
+    pub finish: String,
+    #[serde(default = "default_mask")]
+    pub mask_color: String,
+    #[serde(default = "default_silk")]
+    pub silk_color: String,
+}
+
+fn one() -> f64 {
+    1.0
+}
+fn half() -> f64 {
+    0.5
+}
+fn default_finish() -> String {
+    "LeadFree HASL".into()
+}
+fn default_mask() -> String {
+    "green".into()
+}
+fn default_silk() -> String {
+    "white".into()
+}
+
+impl Default for Stackup {
+    fn default() -> Self {
+        Stackup {
+            copper_layers: 2,
+            thickness: 1.6,
+            outer_copper_oz: 1.0,
+            inner_copper_oz: 0.5,
+            finish: default_finish(),
+            mask_color: default_mask(),
+            silk_color: default_silk(),
+        }
+    }
+}
+
+impl Stackup {
+    pub fn check(&self) -> Result<(), String> {
+        let n = self.copper_layers;
+        if !(n == 1 || ((2..=32).contains(&n) && n.is_multiple_of(2))) {
+            return Err(format!(
+                "copper_layers must be 1 or an even number 2..32, got {n}"
+            ));
+        }
+        if !(self.thickness.is_finite() && self.thickness > 0.1 && self.thickness < 10.0) {
+            return Err(format!("thickness {} mm is out of range", self.thickness));
+        }
+        Ok(())
+    }
+}
+
+/// Design rules. All sizes in mm.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Rules {
+    /// Fab preset these rules came from, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    pub clearance: f64,
+    pub track_width: f64,
+    pub min_track_width: f64,
+    pub via_diameter: f64,
+    pub via_drill: f64,
+    pub min_via_drill: f64,
+    pub min_annular_ring: f64,
+    pub min_drill: f64,
+    pub hole_to_hole: f64,
+    pub copper_to_edge: f64,
+    pub mask_margin: f64,
+    pub paste_margin: f64,
+    pub silk_width: f64,
+    pub silk_to_pad: f64,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub net_classes: BTreeMap<String, NetClass>,
+}
+
+impl Default for Rules {
+    fn default() -> Self {
+        Rules {
+            preset: None,
+            clearance: 0.15,
+            track_width: 0.25,
+            min_track_width: 0.15,
+            via_diameter: 0.6,
+            via_drill: 0.3,
+            min_via_drill: 0.3,
+            min_annular_ring: 0.13,
+            min_drill: 0.3,
+            hole_to_hole: 0.5,
+            copper_to_edge: 0.3,
+            mask_margin: 0.05,
+            paste_margin: 0.0,
+            silk_width: 0.15,
+            silk_to_pad: 0.15,
+            net_classes: BTreeMap::new(),
+        }
+    }
+}
+
+impl Rules {
+    pub fn class(&self, name: Option<&str>) -> NetClass {
+        name.and_then(|n| self.net_classes.get(n))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn clearance_for(&self, class: Option<&str>) -> f64 {
+        self.class(class).clearance.unwrap_or(self.clearance)
+    }
+
+    pub fn track_width_for(&self, class: Option<&str>) -> f64 {
+        self.class(class).track_width.unwrap_or(self.track_width)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct NetClass {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clearance: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_diameter: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_drill: Option<f64>,
+}
+
+// ---------------------------------------------------------------- parts.json
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct PartsFile {
+    #[serde(default = "schema_v")]
+    pub schema: u32,
+    /// Keyed by reference designator.
+    #[serde(default)]
+    pub parts: BTreeMap<String, Part>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Part {
+    /// Footprint id in `cache/footprints/`.
+    pub footprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mpn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manufacturer: Option<String>,
+    /// LCSC part number, for example `C2040`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lcsc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Do not populate.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub dnp: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fields: BTreeMap<String, String>,
+}
+
+impl Part {
+    pub fn new(footprint: impl Into<String>) -> Part {
+        Part {
+            footprint: footprint.into(),
+            value: None,
+            mpn: None,
+            manufacturer: None,
+            lcsc: None,
+            description: None,
+            dnp: false,
+            fields: BTreeMap::new(),
+        }
+    }
+}
+
+pub fn valid_refdes(r: &str) -> bool {
+    !r.is_empty()
+        && r.len() <= 32
+        && r.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && r.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+// ---------------------------------------------------------------- nets.json
+
+/// A pad reference written as `REFDES.PAD`, for example `U1.3`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PadRef {
+    pub part: String,
+    pub pad: String,
+}
+
+impl PadRef {
+    pub fn new(part: impl Into<String>, pad: impl Into<String>) -> Self {
+        PadRef {
+            part: part.into(),
+            pad: pad.into(),
+        }
+    }
+}
+
+impl fmt::Display for PadRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.part, self.pad)
+    }
+}
+
+impl FromStr for PadRef {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (part, pad) = s
+            .split_once('.')
+            .ok_or_else(|| format!("pad reference `{s}` must look like `U1.3`"))?;
+        if !valid_refdes(part) {
+            return Err(format!("bad reference designator in `{s}`"));
+        }
+        if pad.is_empty() {
+            return Err(format!("empty pad number in `{s}`"));
+        }
+        Ok(PadRef::new(part, pad))
+    }
+}
+
+impl Serialize for PadRef {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for PadRef {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = Cow::<str>::deserialize(d)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl JsonSchema for PadRef {
+    fn schema_name() -> Cow<'static, str> {
+        "PadRef".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "type": "string",
+            "description": "Pad reference `REFDES.PAD`, for example `U1.3` or `J1.A5`.",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*\\..+$"
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct NetsFile {
+    #[serde(default = "schema_v")]
+    pub schema: u32,
+    #[serde(default)]
+    pub nets: BTreeMap<String, Net>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct Net {
+    pub pads: Vec<PadRef>,
+    /// Net class name from the board rules.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class: Option<String>,
+}
+
+impl NetsFile {
+    /// Net that a pad belongs to.
+    pub fn net_of(&self, pad: &PadRef) -> Option<&str> {
+        self.nets
+            .iter()
+            .find(|(_, n)| n.pads.contains(pad))
+            .map(|(k, _)| k.as_str())
+    }
+
+    pub fn pad_map(&self) -> BTreeMap<PadRef, String> {
+        let mut m = BTreeMap::new();
+        for (name, net) in &self.nets {
+            for p in &net.pads {
+                m.entry(p.clone()).or_insert_with(|| name.clone());
+            }
+        }
+        m
+    }
+}
+
+pub fn valid_net_name(n: &str) -> bool {
+    !n.is_empty() && n.len() <= 64 && !n.chars().any(|c| c.is_control() || c == '"')
+}
+
+// ---------------------------------------------------------------- placement.json
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct PlacementFile {
+    #[serde(default = "schema_v")]
+    pub schema: u32,
+    #[serde(default)]
+    pub placements: BTreeMap<String, Placement>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Placement {
+    pub x: f64,
+    pub y: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: f64,
+    #[serde(default, skip_serializing_if = "is_top")]
+    pub side: Side,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub locked: bool,
+}
+
+fn is_top(s: &Side) -> bool {
+    *s == Side::Top
+}
+
+impl Placement {
+    pub fn at(x: f64, y: f64) -> Self {
+        Placement {
+            x,
+            y,
+            rotation: 0.0,
+            side: Side::Top,
+            locked: false,
+        }
+    }
+
+    pub fn origin(&self) -> Point {
+        Point::new(self.x, self.y)
+    }
+
+    /// Footprint-local point to board coordinates. Bottom-side parts are
+    /// mirrored in X first; rotation is CCW as seen from the top.
+    pub fn transform(&self, p: Point) -> Point {
+        let p = if self.side == Side::Bottom {
+            Point::new(-p.x, p.y)
+        } else {
+            p
+        };
+        p.rotated(self.rotation).add(self.origin())
+    }
+
+    /// Board coordinates back to footprint-local.
+    pub fn inverse(&self, p: Point) -> Point {
+        let q = p.sub(self.origin()).rotated(-self.rotation);
+        if self.side == Side::Bottom {
+            Point::new(-q.x, q.y)
+        } else {
+            q
+        }
+    }
+
+    /// Board rotation of a footprint-local angle.
+    pub fn transform_angle(&self, deg: f64) -> f64 {
+        if self.side == Side::Bottom {
+            self.rotation - deg
+        } else {
+            self.rotation + deg
+        }
+    }
+}
+
+// ---------------------------------------------------------------- routing.json
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct RoutingFile {
+    #[serde(default = "schema_v")]
+    pub schema: u32,
+    #[serde(default)]
+    pub tracks: Vec<Track>,
+    #[serde(default)]
+    pub vias: Vec<Via>,
+    #[serde(default)]
+    pub zones: Vec<Zone>,
+    #[serde(default)]
+    pub keepouts: Vec<Keepout>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub texts: Vec<BoardText>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graphics: Vec<BoardGraphic>,
+}
+
+/// A polyline of copper on one layer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Track {
+    pub id: String,
+    pub net: String,
+    pub layer: Layer,
+    pub width: f64,
+    pub points: Vec<Point>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Via {
+    pub id: String,
+    pub net: String,
+    pub at: Point,
+    pub diameter: f64,
+    pub drill: f64,
+    /// Start layer; `None` means top (through via).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Layer>,
+    /// End layer; `None` means bottom (through via).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Layer>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PadConnection {
+    #[default]
+    Thermal,
+    Solid,
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Zone {
+    pub id: String,
+    /// `None` for an unconnected copper island fill.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net: Option<String>,
+    pub layers: Vec<Layer>,
+    pub outline: Contour,
+    /// Higher priority fills first and wins overlaps.
+    #[serde(default)]
+    pub priority: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clearance: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_width: Option<f64>,
+    #[serde(default)]
+    pub pad_connection: PadConnection,
+    #[serde(default = "default_gap")]
+    pub thermal_gap: f64,
+    #[serde(default = "default_spoke")]
+    pub thermal_spoke: f64,
+}
+
+fn default_gap() -> f64 {
+    0.3
+}
+fn default_spoke() -> f64 {
+    0.3
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Keepout {
+    pub id: String,
+    pub layers: Vec<Layer>,
+    pub outline: Contour,
+    #[serde(default)]
+    pub forbid: Forbid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BoardText {
+    pub id: String,
+    pub layer: Layer,
+    pub text: String,
+    pub at: Point,
+    #[serde(default = "default_text")]
+    pub size: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: f64,
+}
+
+fn default_text() -> f64 {
+    1.0
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BoardGraphic {
+    pub id: String,
+    pub layer: Layer,
+    pub shape: Shape,
+    #[serde(default)]
+    pub width: f64,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub filled: bool,
+}
+
+// ---------------------------------------------------------------- notes.json
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct NotesFile {
+    #[serde(default = "schema_v")]
+    pub schema: u32,
+    #[serde(default)]
+    pub notes: Vec<Note>,
+}
+
+/// A comment left by the user in the viewer, or by the agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Note {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Point>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refdes: Option<String>,
+    /// `user` or `agent`.
+    pub author: String,
+    /// Seconds since the Unix epoch.
+    pub created: u64,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub resolved: bool,
+}
+
+// ---------------------------------------------------------------- violations
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    Error,
+    Warning,
+}
+
+/// A rule failure found by validation or DRC.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Violation {
+    /// Stable rule id, for example `clearance` or `pad_in_two_nets`.
+    pub rule: String,
+    pub severity: Severity,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Point>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<Layer>,
+    /// Ids of the items involved (refdes, pad refs, track ids).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<String>,
+}
+
+impl Violation {
+    pub fn error(rule: &str, message: impl Into<String>) -> Self {
+        Violation {
+            rule: rule.into(),
+            severity: Severity::Error,
+            message: message.into(),
+            at: None,
+            layer: None,
+            items: Vec::new(),
+        }
+    }
+
+    pub fn warning(rule: &str, message: impl Into<String>) -> Self {
+        Violation {
+            severity: Severity::Warning,
+            ..Self::error(rule, message)
+        }
+    }
+
+    pub fn at(mut self, p: Point) -> Self {
+        self.at = Some(p);
+        self
+    }
+
+    pub fn on(mut self, l: Layer) -> Self {
+        self.layer = Some(l);
+        self
+    }
+
+    pub fn items<I: IntoIterator<Item = S>, S: Into<String>>(mut self, it: I) -> Self {
+        self.items = it.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Identity used to tell new violations from existing ones.
+    pub fn key(&self) -> String {
+        let mut items = self.items.clone();
+        items.sort();
+        format!(
+            "{}|{}|{}",
+            self.rule,
+            self.layer.map(|l| l.to_string()).unwrap_or_default(),
+            items.join(",")
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn padref_parse() {
+        let p: PadRef = "U1.3".parse().unwrap();
+        assert_eq!(p, PadRef::new("U1", "3"));
+        let p: PadRef = "J1.A5".parse().unwrap();
+        assert_eq!(p.pad, "A5");
+        let p: PadRef = "U2.EP.1".parse().unwrap();
+        assert_eq!(p.pad, "EP.1");
+        assert!("U1".parse::<PadRef>().is_err());
+        assert!("1U.3".parse::<PadRef>().is_err());
+    }
+
+    #[test]
+    fn placement_transform() {
+        let pl = Placement {
+            x: 10.0,
+            y: 5.0,
+            rotation: 90.0,
+            side: Side::Top,
+            locked: false,
+        };
+        let p = pl.transform(Point::new(1.0, 0.0));
+        assert!((p.x - 10.0).abs() < 1e-12 && (p.y - 6.0).abs() < 1e-12);
+
+        let pl = Placement {
+            side: Side::Bottom,
+            rotation: 0.0,
+            ..pl
+        };
+        let p = pl.transform(Point::new(1.0, 0.0));
+        assert!((p.x - 9.0).abs() < 1e-12 && (p.y - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn stackup_check() {
+        assert!(Stackup::default().check().is_ok());
+        let s = Stackup {
+            copper_layers: 3,
+            ..Stackup::default()
+        };
+        assert!(s.check().is_err());
+    }
+}

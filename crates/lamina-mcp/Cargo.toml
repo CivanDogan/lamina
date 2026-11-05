@@ -6,7 +6,21 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+lamina-core.workspace = true
+rmcp.workspace = true
+tokio.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [[bin]]
 name = "lamina"
 path = "src/main.rs"
+
+[lints]
+workspace = true
