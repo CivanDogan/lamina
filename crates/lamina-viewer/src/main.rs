@@ -365,18 +365,6 @@ impl App {
         if let Some((_, _, p)) = best {
             return Some(p);
         }
-        for f in &l.analysis.fills {
-            let Some(c) = f.layer.copper() else { continue };
-            if !self.is_visible(SceneLayer::Copper(c.index(n))) {
-                continue;
-            }
-            if f.polygons.iter().any(|poly| poly.prim().contains(p)) {
-                return Some(Pick::Fill {
-                    zone: f.zone.clone(),
-                    net: f.net.clone(),
-                });
-            }
-        }
         let d = &l.data;
         for side in [Side::Top, Side::Bottom] {
             for (r, pl) in &d.placement.placements {
@@ -398,6 +386,19 @@ impl App {
                 }
             }
         }
+        // Pours come after parts: a click inside a courtyard means the part.
+        for f in &l.analysis.fills {
+            let Some(c) = f.layer.copper() else { continue };
+            if !self.is_visible(SceneLayer::Copper(c.index(n))) {
+                continue;
+            }
+            if f.polygons.iter().any(|poly| poly.prim().contains(p)) {
+                return Some(Pick::Fill {
+                    zone: f.zone.clone(),
+                    net: f.net.clone(),
+                });
+            }
+        }
         for h in &d.board.holes {
             if h.at.dist(p) <= h.drill.min_size() / 2.0 {
                 return Some(Pick::Hole { id: h.id.clone() });
@@ -417,6 +418,12 @@ impl App {
                 }
             }
         }
+        // The outline before pours, whose edge usually coincides with it.
+        if let Some(o) = &d.board.outline {
+            if near_edge(o) {
+                return Some(Pick::Outline);
+            }
+        }
         for z in &d.routing.zones {
             let visible = z.layers.iter().any(|l| {
                 l.copper()
@@ -427,11 +434,6 @@ impl App {
                     zone: z.id.clone(),
                     net: z.net.clone(),
                 });
-            }
-        }
-        if let Some(o) = &d.board.outline {
-            if near_edge(o) {
-                return Some(Pick::Outline);
             }
         }
         None

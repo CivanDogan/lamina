@@ -1423,15 +1423,25 @@ impl App {
         let Some(l) = &self.loaded else { return };
         let d = l.data.clone();
         let n = d.board.stackup.copper_layers;
-        // Drop selections whose items are gone (deleted by us or the agent).
-        self.sel.retain(|s| match s {
-            Sel::Part(r) => d.placement.placements.contains_key(r),
-            Sel::Track { id, .. } => d.routing.tracks.iter().any(|t| &t.id == id),
-            Sel::Via(id) => d.routing.vias.iter().any(|t| &t.id == id),
-            Sel::Zone(id) => d.routing.zones.iter().any(|t| &t.id == id),
-            Sel::Keepout(id) => d.routing.keepouts.iter().any(|t| &t.id == id),
-            Sel::Hole(id) => d.board.holes.iter().any(|t| &t.id == id),
-            Sel::Outline => d.board.outline.is_some(),
+        // Drop selections whose items are gone (deleted by us or the agent),
+        // but not while our own edit is still on its way to the files.
+        let settled = self.editor.as_ref().is_none_or(|e| e.busy == 0)
+            && match (self.own_edit, self.last_reload) {
+                (Some(e), Some(r)) => r > e,
+                (Some(_), None) => false,
+                _ => true,
+            };
+        self.sel.retain(|s| {
+            !settled
+                || match s {
+                    Sel::Part(r) => d.placement.placements.contains_key(r),
+                    Sel::Track { id, .. } => d.routing.tracks.iter().any(|t| &t.id == id),
+                    Sel::Via(id) => d.routing.vias.iter().any(|t| &t.id == id),
+                    Sel::Zone(id) => d.routing.zones.iter().any(|t| &t.id == id),
+                    Sel::Keepout(id) => d.routing.keepouts.iter().any(|t| &t.id == id),
+                    Sel::Hole(id) => d.board.holes.iter().any(|t| &t.id == id),
+                    Sel::Outline => d.board.outline.is_some(),
+                }
         });
         if self.sel.is_empty() {
             return;

@@ -391,7 +391,15 @@ pub fn move_area(d: &mut ProjectData, of: &VertexOf, delta: Point) -> EditResult
             a.center = p6(a.center.add(delta));
         }
     }
-    Ok("Moved the outline".into())
+    Ok(format!(
+        "Moved {}",
+        match of {
+            VertexOf::Zone(id) => format!("pour {id}"),
+            VertexOf::Keepout(id) => format!("keep-out {id}"),
+            VertexOf::Outline => "the board outline".to_string(),
+            VertexOf::Track(id) => format!("track {id}"),
+        }
+    ))
 }
 
 /// A hand-drawn route: runs of points per layer, joined by vias.
