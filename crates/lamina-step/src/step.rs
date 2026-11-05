@@ -1410,9 +1410,64 @@ pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
     // child -> parent links with a transform.
     let mut ids: Vec<u32> = e.keys().copied().collect();
     ids.sort_unstable();
+    // Shape representations, not styling or relationship records.
     let is_rep = |k: &str| {
-        k.ends_with("REPRESENTATION") && !k.contains("RELATIONSHIP") && !k.contains("PRESENTATION")
+        k.ends_with("REPRESENTATION")
+            && !k.contains("RELATIONSHIP")
+            && !k.contains("PRESENTATION_REPRESENTATION")
+            && !k.starts_with("DRAUGHTING")
+            && k != "CONTEXT_DEPENDENT_SHAPE_REPRESENTATION"
     };
+    // Which side of each transform relationship is the child, from the
+    // product structure: CDSR -> NAUO (parent, child product definitions)
+    // and SHAPE_DEFINITION_REPRESENTATION (product definition -> rep).
+    let mut pd_rep: HashMap<u32, u32> = HashMap::new();
+    for ent in e.values() {
+        if ent.kind() == "SHAPE_DEFINITION_REPRESENTATION" {
+            let a = ent.args();
+            let (Some(pds), Some(rep)) = (
+                a.first().and_then(|x| x.id()),
+                a.get(1).and_then(|x| x.id()),
+            ) else {
+                continue;
+            };
+            if let Some(pd) = e
+                .get(&pds)
+                .and_then(|p| p.args().get(2))
+                .and_then(|x| x.id())
+            {
+                pd_rep.insert(pd, rep);
+            }
+        }
+    }
+    let mut child_rep_of: HashMap<u32, u32> = HashMap::new();
+    for ent in e.values() {
+        if ent.kind() == "CONTEXT_DEPENDENT_SHAPE_REPRESENTATION" {
+            let a = ent.args();
+            let (Some(rel), Some(pds)) = (
+                a.first().and_then(|x| x.id()),
+                a.get(1).and_then(|x| x.id()),
+            ) else {
+                continue;
+            };
+            let Some(nauo) = e
+                .get(&pds)
+                .and_then(|p| p.args().get(2))
+                .and_then(|x| x.id())
+                .and_then(|i| e.get(&i))
+            else {
+                continue;
+            };
+            if let Some(child) = nauo
+                .args()
+                .get(4)
+                .and_then(|x| x.id())
+                .and_then(|pd| pd_rep.get(&pd))
+            {
+                child_rep_of.insert(rel, *child);
+            }
+        }
+    }
     let mut group: HashMap<u32, u32> = HashMap::new();
     fn root(g: &mut HashMap<u32, u32>, x: u32) -> u32 {
         let mut r = x;
@@ -1440,17 +1495,23 @@ pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
                     continue;
                 };
                 let a = itd.args();
-                let from = a
+                let t1 = a
                     .get(2)
                     .and_then(|x| x.id())
                     .map(|i| placement_xf(&ctx.m, i))
                     .unwrap_or_else(Xf::id);
-                let to = a
+                let t2 = a
                     .get(3)
                     .and_then(|x| x.id())
                     .map(|i| placement_xf(&ctx.m, i))
                     .unwrap_or_else(Xf::id);
-                links.push((r1, r2, to.then(&from.inverse())));
+                // Default: rep_1 is placed into rep_2, unless the product
+                // structure says rep_2 is the child.
+                if child_rep_of.get(id) == Some(&r2) {
+                    links.push((r2, r1, t1.then(&t2.inverse())));
+                } else {
+                    links.push((r1, r2, t2.then(&t1.inverse())));
+                }
             } else {
                 let (a, b) = (root(&mut group, r1), root(&mut group, r2));
                 group.insert(a, b);
@@ -1540,6 +1601,17 @@ pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
         for (c, cx) in children.get(&g).cloned().unwrap_or_default() {
             stack.push((c, xf.then(&cx), depth + 1));
         }
+    }
+    if std::env::var("LAMINA_STEP_DEBUG").is_ok() {
+        let roots: Vec<_> = members.keys().filter(|g| !is_child.contains(g)).collect();
+        eprintln!(
+            "reps {} groups {} links {} roots {:?} emitted {}",
+            reps.len(),
+            members.len(),
+            links.len(),
+            roots,
+            emitted
+        );
     }
     if emitted == 0 {
         // No usable representation graph: take every solid as is.
@@ -1647,6 +1719,39 @@ mod tests {
 #43=SURFACE_STYLE_FILL_AREA(#42);\n#44=SURFACE_SIDE_STYLE('',(#43));\n#45=SURFACE_STYLE_USAGE(.BOTH.,#44);\n\
 #46=PRESENTATION_STYLE_ASSIGNMENT((#45));\n#47=STYLED_ITEM('',(#46),#31);\n\
 #50=( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );\nENDSEC;\nEND-ISO-10303-21;\n";
+
+    #[test]
+    fn assembly_placement_parent_first() {
+        // SolidWorks order: rep_1 is the parent, rep_2 the child; the
+        // product structure (NAUO) says which is which.
+        let asm = CUBE.replace(
+            "ENDSEC;
+END-ISO-10303-21;",
+            "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#31,#4),#99);
+#61=CARTESIAN_POINT('',(10.,0.,0.));
+#62=AXIS2_PLACEMENT_3D('',#61,#2,#3);
+#63=SHAPE_REPRESENTATION('',(#62),#99);
+#64=( REPRESENTATION_RELATIONSHIP('','',#63,#60) REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#65) SHAPE_REPRESENTATION_RELATIONSHIP() );
+#65=ITEM_DEFINED_TRANSFORMATION('','',#62,#4);
+#70=PRODUCT_DEFINITION('p','',#98,#97);
+#71=PRODUCT_DEFINITION('c','',#98,#97);
+#72=PRODUCT_DEFINITION_SHAPE('','',#70);
+#73=PRODUCT_DEFINITION_SHAPE('','',#71);
+#74=SHAPE_DEFINITION_REPRESENTATION(#72,#63);
+#75=SHAPE_DEFINITION_REPRESENTATION(#73,#60);
+#76=NEXT_ASSEMBLY_USAGE_OCCURRENCE('','','',#70,#71,$);
+#77=PRODUCT_DEFINITION_SHAPE('','',#76);
+#78=CONTEXT_DEPENDENT_SHAPE_REPRESENTATION(#64,#77);
+ENDSEC;
+END-ISO-10303-21;",
+        );
+        let m = load(asm.as_bytes()).unwrap();
+        let (lo, hi) = m.bounds().unwrap();
+        assert!(
+            (lo[0] - 8.0).abs() < 0.05 && (hi[0] - 12.0).abs() < 0.05,
+            "{lo:?} {hi:?}"
+        );
+    }
 
     #[test]
     fn cylinder_side_with_seam() {

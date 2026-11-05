@@ -14,7 +14,7 @@ pub use nets::{Connect, Disconnect, SetNets};
 pub use output::{AddNote, Export, Exported, ListNotes, ResolveNotes};
 pub use parts::{
     AddPart, AddParts, BodySize, FootprintFromPackage, FootprintFromPads, FootprintId,
-    FootprintSummary, RemovePart,
+    FootprintSummary, RemovePart, SetModel,
 };
 pub use place::{
     Align, Axis, Distribute, FlipPart, Measure, Measurement, MoveParts, Place, PlaceMany,

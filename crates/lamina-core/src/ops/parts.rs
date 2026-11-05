@@ -295,3 +295,71 @@ impl Project {
         self.commit(d, t, p.strict, format!("part {} removed", p.refdes))
     }
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct SetModel {
+    /// Footprint to change.
+    pub footprint: String,
+    /// Model file (STEP or OBJ). An absolute path is copied into
+    /// `cache/models/user/`; a relative path is taken inside `cache/models/`.
+    pub file: String,
+    /// Offset in mm, applied after rotation.
+    #[serde(default)]
+    pub offset: [f64; 3],
+    /// Rotation in degrees about X, then Y, then Z.
+    #[serde(default)]
+    pub rotation: [f64; 3],
+}
+
+impl Project {
+    pub fn set_model(&mut self, p: SetModel) -> Result<OpResult> {
+        if !self.data.footprints.contains_key(&p.footprint) {
+            return Err(Error::invalid(format!("no footprint `{}`", p.footprint)));
+        }
+        let src = std::path::Path::new(&p.file);
+        let rel = if src.is_absolute() {
+            let name = src
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| Error::invalid("model path has no file name"))?;
+            let rel = format!("user/{name}");
+            let dst = self.root().join(MODEL_DIR).join(&rel);
+            if src != dst {
+                std::fs::create_dir_all(dst.parent().unwrap()).map_err(|e| Error::io(&dst, e))?;
+                std::fs::copy(src, &dst).map_err(|e| Error::io(src, e))?;
+            }
+            rel
+        } else {
+            if p.file.contains("..") {
+                return Err(Error::invalid(
+                    "relative model paths stay inside cache/models",
+                ));
+            }
+            p.file.replace('\\', "/")
+        };
+        let path = self.root().join(MODEL_DIR).join(&rel);
+        let mesh = lamina_step::load(&path)
+            .map_err(|e| Error::invalid(format!("model does not load: {e}")))?;
+        let (lo, hi) = mesh.bounds().unwrap_or(([0.0; 3], [0.0; 3]));
+        let mut d = self.data.clone();
+        let fp = d.footprints.get_mut(&p.footprint).unwrap();
+        fp.model = Some(ModelRef {
+            file: rel.clone(),
+            offset: p.offset,
+            rotation: p.rotation,
+            scale: [1.0; 3],
+        });
+        let id = p.footprint.clone();
+        let mut r = self.commit(
+            d,
+            Touched::default().footprint(id.clone()),
+            false,
+            format!("footprint `{id}` now uses model {rel}"),
+        )?;
+        r.notes.push(format!(
+            "model bounds before offset: min ({:.3}, {:.3}, {:.3}) max ({:.3}, {:.3}, {:.3}), {} triangles",
+            lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], mesh.triangles()
+        ));
+        Ok(r)
+    }
+}

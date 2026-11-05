@@ -585,6 +585,16 @@ impl Lamina {
                 .map(|n| serde_json::json!({"resolved": n}))
         })
     }
+    /// Use a different 3D model (STEP or OBJ) for a footprint, e.g. the
+    /// manufacturer's own STEP. Reply includes the model's raw bounds to
+    /// work out the offset that centres it on the pads.
+    #[tool(annotations(title = "Set 3D model"))]
+    async fn set_model(
+        &self,
+        Parameters(p): Parameters<SetModel>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.set_model(p))
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
