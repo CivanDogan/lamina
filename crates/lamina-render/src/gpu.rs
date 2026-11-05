@@ -485,7 +485,7 @@ impl Gpu {
             let start = idx.len() as u32;
             // Pours draw in their own depth slot just below the layer's
             // pads and tracks, and lighter.
-            for (part, items, k) in [(0, &l.items[..l.pour], 0.42), (1, &l.items[l.pour..], 1.0)] {
+            for (part, items, k) in [(0, &l.items[..l.pour], 0.26), (1, &l.items[l.pour..], 1.0)] {
                 let mut tris = Tris::default();
                 for g in items {
                     tris.add(g, px_per_mm);

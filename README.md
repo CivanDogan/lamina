@@ -33,8 +33,31 @@ cargo build --release
 ## Use with an MCP client
 
 ```
-claude mcp add lamina -- <path>/target/release/lamina mcp
+claude mcp add --scope user lamina -- <path>/target/release/lamina mcp
 ```
+
+Codex: add `[mcp_servers.lamina]` with `command = "<path>/target/release/lamina"` and `args = ["mcp"]` to `~/.codex/config.toml`.
+
+A typical session: `open` (create: true), `use_fab_preset`, `set_outline`,
+`import_lcsc` for each part, `set_nets`, `place_many`, `autoroute`, `add_zone`
+for ground, `check`, `render`, `export`. Read the user's comments with `notes`.
+
+## Viewer
+
+```
+lamina-viewer <project folder>
+```
+
+The viewer watches the folder and redraws whenever files change. Keys: `1` 2D,
+`2` 3D, `F` fit. 2D: scroll to zoom, drag to pan, click to pin a part or net.
+3D: drag to orbit, right-drag to pan. Notes typed in the side panel are saved to
+`notes.json` for the agent.
+
+## Tools
+
+`lamina-step` has two developer examples: `corpus <dir>` loads every STEP file in
+a folder and compares it with the OBJ of the same name, and `lamina-render`'s
+`meshview <model> <out.png>` renders a single model.
 
 ## Licence
 

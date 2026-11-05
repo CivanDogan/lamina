@@ -213,7 +213,9 @@ impl<'a> Ctx<'a> {
             let cl = rules
                 .clearance_for(my_class.as_deref())
                 .max(rules.clearance_for(self.class(&it.net).as_deref()));
-            let r = cl + hw;
+            // Segments between cell centres can pass closer than the centres
+            // themselves; keep half a cell diagonal in hand.
+            let r = cl + hw + self.g.pitch * 0.75;
             self.stamp(&mut b, it.layer as usize, &it.prim, r);
         }
         let layers = d.board.stackup.copper_layers;

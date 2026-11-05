@@ -1553,7 +1553,8 @@ pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
             .filter(|p| !p.positions.is_empty())
             .collect(),
     };
-    mesh.parts.sort_by_key(|p| std::cmp::Reverse(p.positions.len()));
+    mesh.parts
+        .sort_by_key(|p| std::cmp::Reverse(p.positions.len()));
     if mesh.parts.is_empty() {
         return Err(format!(
             "no tessellatable geometry ({} faces failed)",
