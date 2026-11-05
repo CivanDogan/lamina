@@ -403,6 +403,15 @@ pub enum Provenance {
         part: String,
         fetched: String,
     },
+    /// Imported from a KiCad footprint library or board file.
+    Kicad {
+        /// Library nickname, e.g. `Resistor_SMD`.
+        library: String,
+        footprint: String,
+        /// File or URL the footprint was read from.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        path: String,
+    },
     Manual {
         note: String,
     },

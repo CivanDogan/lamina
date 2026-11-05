@@ -1,4 +1,5 @@
 pub mod board;
+pub mod kicad;
 pub mod lcsc;
 pub mod nets;
 pub mod output;
@@ -9,6 +10,10 @@ pub mod route;
 pub mod status;
 
 pub use board::{RectSpec, SetOutline, SetRules, SetStackup, UseFabPreset};
+pub use kicad::{
+    ExportKicad, ImportKicadBoard, ImportKicadFootprint, KicadExported, KicadSearch,
+    SearchKicadFootprints,
+};
 pub use lcsc::{ImportLcsc, ImportMany, SearchPart, natural, today};
 pub use nets::{Connect, Disconnect, SetNets};
 pub use output::{AddNote, Export, Exported, ListNotes, ResolveNotes};

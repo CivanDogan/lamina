@@ -21,6 +21,7 @@ Status: early development. See `docs/specs/` for the design.
 | `lamina-scene` | Draw list shared by the renderers |
 | `lamina-render` | PNG rendering, 2D and 3D |
 | `lamina-build` | Jsonnet design sources, workspaces |
+| `lamina-kicad` | KiCad footprint and board files in and out |
 | `lamina-core` | Project operations, one function per tool |
 | `lamina-mcp` | The `lamina` binary: MCP server and CLI |
 | `lamina-viewer` | Live 2D/3D viewer and editor |
@@ -90,6 +91,22 @@ Several boards share blocks through a workspace: `lamina workspace <dir>`
 writes `lamina.json` with `boards` and `lib` folders. Each lib folder is an
 import path and may hold shared `footprints/` and `models/`.
 `lamina new <dir> --modular` starts a board from a source template.
+
+## KiCad files
+
+Lamina reads and writes KiCad's formats without running KiCad:
+
+- `import_kicad_footprint` takes `Library:Name` (for example
+  `Package_TO_SOT_SMD:SOT-23`), a footprint name from a local library, or a
+  `.kicad_mod` file. Local libraries come from `kicad_footprints` in
+  `lamina.json`, `KICAD*_FOOTPRINT_DIR` or a standard install; otherwise the
+  footprint and its STEP model are fetched from the official KiCad libraries.
+  `search_kicad_footprints` searches the local ones.
+- `import_kicad_board` / `lamina import-kicad <file> <dir>` read a
+  `.kicad_pcb` (KiCad 6 to 10): outline, footprints, parts, nets, placement,
+  tracks, vias, zones, keep-outs and texts.
+- `export_kicad` / `lamina export-kicad <dir>` write a `.kicad_pcb` that KiCad
+  8 or newer opens; KiCad refills the zones.
 
 ## Tools
 

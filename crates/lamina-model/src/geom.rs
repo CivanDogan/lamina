@@ -279,6 +279,24 @@ impl Contour {
         out
     }
 
+    /// The contour moved by (dx, dy).
+    pub fn translated(&self, dx: f64, dy: f64) -> Contour {
+        Contour {
+            vertices: self
+                .vertices
+                .iter()
+                .map(|v| Vertex {
+                    x: v.x + dx,
+                    y: v.y + dy,
+                    arc: v.arc.map(|a| ArcTo {
+                        center: Point::new(a.center.x + dx, a.center.y + dy),
+                        ccw: a.ccw,
+                    }),
+                })
+                .collect(),
+        }
+    }
+
     /// Exact signed area (positive when counter-clockwise).
     pub fn signed_area(&self) -> f64 {
         let n = self.vertices.len();
@@ -360,6 +378,34 @@ pub enum Shape {
 }
 
 impl Shape {
+    /// The shape moved by (dx, dy).
+    pub fn translated(&self, dx: f64, dy: f64) -> Shape {
+        let t = |p: &Point| Point::new(p.x + dx, p.y + dy);
+        match self {
+            Shape::Line { a, b } => Shape::Line { a: t(a), b: t(b) },
+            Shape::Arc {
+                center,
+                start,
+                angle,
+            } => Shape::Arc {
+                center: t(center),
+                start: t(start),
+                angle: *angle,
+            },
+            Shape::Circle { center, radius } => Shape::Circle {
+                center: t(center),
+                radius: *radius,
+            },
+            Shape::Rect { min, max } => Shape::Rect {
+                min: t(min),
+                max: t(max),
+            },
+            Shape::Polygon { points } => Shape::Polygon {
+                points: points.iter().map(t).collect(),
+            },
+        }
+    }
+
     pub fn points(&self) -> Vec<Point> {
         match self {
             Shape::Line { a, b } => vec![*a, *b],

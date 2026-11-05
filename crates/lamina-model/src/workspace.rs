@@ -24,6 +24,12 @@ pub struct WorkspaceFile {
     /// Library folders, relative to the workspace root.
     #[serde(default = "default_lib")]
     pub lib: Vec<String>,
+    /// Folders holding KiCad `*.pretty` footprint libraries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kicad_footprints: Vec<String>,
+    /// Folders holding KiCad `*.3dshapes` model libraries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kicad_models: Vec<String>,
 }
 
 fn schema_v() -> u32 {
@@ -83,6 +89,8 @@ impl Workspace {
                 name: name.into(),
                 boards: Vec::new(),
                 lib: default_lib(),
+                kicad_footprints: Vec::new(),
+                kicad_models: Vec::new(),
             },
         };
         ws.save()?;
@@ -127,6 +135,33 @@ impl Workspace {
 
     pub fn lib_dirs(&self) -> Vec<PathBuf> {
         self.file.lib.iter().map(|l| self.root.join(l)).collect()
+    }
+
+    fn resolve(&self, rel: &str) -> PathBuf {
+        let p = Path::new(rel);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            self.root.join(p)
+        }
+    }
+
+    /// KiCad footprint library roots named in `lamina.json`.
+    pub fn kicad_footprint_dirs(&self) -> Vec<PathBuf> {
+        self.file
+            .kicad_footprints
+            .iter()
+            .map(|d| self.resolve(d))
+            .collect()
+    }
+
+    /// KiCad 3D model library roots named in `lamina.json`.
+    pub fn kicad_model_dirs(&self) -> Vec<PathBuf> {
+        self.file
+            .kicad_models
+            .iter()
+            .map(|d| self.resolve(d))
+            .collect()
     }
 
     /// Shared footprint folders, in search order.

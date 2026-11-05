@@ -37,6 +37,20 @@ enum Cmd {
     },
     /// Build a board's design.jsonnet into its JSON files.
     Build { dir: PathBuf },
+    /// Import a KiCad board file into a project (created when missing).
+    ImportKicad {
+        file: PathBuf,
+        dir: PathBuf,
+        /// Fetch missing 3D models from the official KiCad libraries.
+        #[arg(long)]
+        online: bool,
+    },
+    /// Write a project as a .kicad_pcb file.
+    ExportKicad {
+        dir: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Create a workspace (lamina.json with a lib folder) in a folder.
     Workspace {
         dir: PathBuf,
@@ -68,6 +82,31 @@ fn main() -> anyhow::Result<()> {
                 ws.add_board(&dir)?;
             }
             println!("{}", serde_json::to_string_pretty(&p.status())?);
+            Ok(())
+        }
+        Cmd::ImportKicad { file, dir, online } => {
+            let path = dir.to_string_lossy().to_string();
+            let name = file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_string);
+            let mut p = server::open_project(&path, true, name, false)?;
+            let r = p.import_kicad_board(lamina_core::ImportKicadBoard {
+                path: file.to_string_lossy().to_string(),
+                models: true,
+                online,
+                replace: false,
+                strict: false,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
+            Ok(())
+        }
+        Cmd::ExportKicad { dir, out } => {
+            let p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
+            let r = p.export_kicad(lamina_core::ExportKicad {
+                path: out.map(|o| o.to_string_lossy().to_string()),
+            })?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
             Ok(())
         }
         Cmd::Build { dir } => {

@@ -21,6 +21,7 @@ lamina-scene = { path = "crates/lamina-scene" }
 lamina-render = { path = "crates/lamina-render" }
 lamina-core = { path = "crates/lamina-core" }
 lamina-build = { path = "crates/lamina-build" }
+lamina-kicad = { path = "crates/lamina-kicad" }
 
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }

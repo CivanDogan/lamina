@@ -93,6 +93,52 @@ impl ProjectData {
         }
     }
 
+    /// Move everything on the board by (dx, dy): outline, holes, parts,
+    /// tracks, vias, zones, keep-outs, texts and drawings.
+    pub fn translate(&mut self, dx: f64, dy: f64) {
+        let r = crate::json::round6;
+        let mv = |p: &mut crate::geom::Point| {
+            p.x = r(p.x + dx);
+            p.y = r(p.y + dy);
+        };
+        if let Some(o) = self.board.outline.as_mut() {
+            *o = o.translated(dx, dy);
+        }
+        for c in self.board.cutouts.iter_mut() {
+            *c = c.translated(dx, dy);
+        }
+        for h in self.board.holes.iter_mut() {
+            mv(&mut h.at);
+        }
+        for pl in self.placement.placements.values_mut() {
+            pl.x = r(pl.x + dx);
+            pl.y = r(pl.y + dy);
+        }
+        for t in self.routing.tracks.iter_mut() {
+            t.points.iter_mut().for_each(&mv);
+        }
+        for v in self.routing.vias.iter_mut() {
+            mv(&mut v.at);
+        }
+        for z in self.routing.zones.iter_mut() {
+            z.outline = z.outline.translated(dx, dy);
+        }
+        for k in self.routing.keepouts.iter_mut() {
+            k.outline = k.outline.translated(dx, dy);
+        }
+        for t in self.routing.texts.iter_mut() {
+            mv(&mut t.at);
+        }
+        for g in self.routing.graphics.iter_mut() {
+            g.shape = g.shape.translated(dx, dy);
+        }
+        for n in self.notes.notes.iter_mut() {
+            if let Some(p) = n.at.as_mut() {
+                mv(p);
+            }
+        }
+    }
+
     /// Whether `dir` looks like a Lamina project.
     pub fn is_project(dir: &Path) -> bool {
         dir.join(FileKind::Board.file_name()).is_file()

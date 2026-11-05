@@ -202,6 +202,9 @@ impl Project {
                     Provenance::Ipc7351 { package, .. } => format!("ipc7351 {package}"),
                     Provenance::Datasheet { document, .. } => format!("datasheet {document}"),
                     Provenance::Lcsc { part, .. } => format!("lcsc {part}"),
+                    Provenance::Kicad {
+                        library, footprint, ..
+                    } => format!("kicad {library}:{footprint}"),
                     Provenance::Manual { .. } => "manual".into(),
                 },
                 size: f.courtyard_bbox(),

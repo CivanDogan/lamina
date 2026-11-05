@@ -287,3 +287,151 @@ fn shared_editor_and_engine_see_each_other() {
     assert!(viewer.sync().unwrap());
     assert_eq!(viewer.data.placement.placements["R1"].rotation, 90.0);
 }
+
+#[test]
+fn kicad_footprint_import_and_board_round_trip() {
+    let fixtures = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../lamina-kicad/tests/fixtures/footprints");
+    let (t, mut p) = new_project();
+    p.set_kicad_source(std::sync::Arc::new(lamina_kicad::DirSource {
+        footprints: fixtures.clone(),
+        models: t.path().join("no-models"),
+    }));
+    // Fetched "online" (from the fixture source), with a part.
+    let r = p
+        .import_kicad_footprint(ImportKicadFootprint {
+            footprint: "Package_TO_SOT_SMD:SOT-23".into(),
+            refdes: Some("Q1".into()),
+            value: Some("BSS138".into()),
+            footprint_id: None,
+            model: true,
+            online: true,
+            replace: false,
+            strict: false,
+        })
+        .unwrap();
+    assert!(
+        r.summary.contains("Q1: Package_TO_SOT_SMD:SOT-23"),
+        "{}",
+        r.summary
+    );
+    assert!(
+        r.notes
+            .iter()
+            .any(|n| n.contains("not downloaded") || n.contains("not found")),
+        "{:?}",
+        r.notes
+    );
+    assert_eq!(p.data.footprints["SOT-23"].pads.len(), 3);
+    assert_eq!(p.data.parts.parts["Q1"].value.as_deref(), Some("BSS138"));
+    // Not found locally and offline: a clear error.
+    let e = p
+        .import_kicad_footprint(ImportKicadFootprint {
+            footprint: "Nope:Missing".into(),
+            refdes: None,
+            value: None,
+            footprint_id: None,
+            model: false,
+            online: false,
+            replace: false,
+            strict: false,
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("not found"), "{e}");
+    // A .kicad_mod path works too.
+    let path = fixtures.join("Resistor_SMD.pretty/R_0603_1608Metric.kicad_mod");
+    p.import_kicad_footprint(ImportKicadFootprint {
+        footprint: path.to_string_lossy().to_string(),
+        refdes: Some("R1".into()),
+        value: None,
+        footprint_id: Some("R0603K".into()),
+        model: false,
+        online: false,
+        replace: false,
+        strict: false,
+    })
+    .unwrap();
+    assert!(p.data.footprints.contains_key("R0603K"));
+    assert_eq!(p.data.parts.parts["R1"].footprint, "R0603K");
+
+    p.set_outline(SetOutline {
+        rect: Some(RectSpec {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 15.0,
+            corner_radius: 0.0,
+        }),
+        contour: None,
+        cutouts: None,
+        strict: false,
+    })
+    .unwrap();
+    p.set_nets(SetNets {
+        nets: [(
+            "GND".to_string(),
+            Net {
+                pads: vec!["Q1.2".parse().unwrap(), "R1.1".parse().unwrap()],
+                class: None,
+            },
+        )]
+        .into(),
+        replace: true,
+        strict: false,
+    })
+    .unwrap();
+    p.place(Place {
+        refdes: "Q1".into(),
+        x: 5.0,
+        y: 5.0,
+        rotation: None,
+        side: None,
+        locked: None,
+        strict: false,
+    })
+    .unwrap();
+    p.place(Place {
+        refdes: "R1".into(),
+        x: 12.0,
+        y: 5.0,
+        rotation: Some(90.0),
+        side: Some(Side::Bottom),
+        locked: None,
+        strict: false,
+    })
+    .unwrap();
+    let out = p.export_kicad(ExportKicad { path: None }).unwrap();
+    assert!(out.path.ends_with("demo.kicad_pcb"), "{}", out.path);
+    assert_eq!(out.parts, 2);
+
+    // Into a fresh project.
+    let dir2 = t.path().join("imported");
+    let mut q = Project::create(&dir2, "x").unwrap();
+    let r = q
+        .import_kicad_board(ImportKicadBoard {
+            path: out.path.clone(),
+            models: false,
+            online: false,
+            replace: false,
+            strict: false,
+        })
+        .unwrap();
+    assert!(r.summary.contains("2 parts"), "{}", r.summary);
+    assert_eq!(q.data.board.name, "demo");
+    assert_eq!(q.data.placement.placements["R1"].side, Side::Bottom);
+    assert_eq!(q.data.placement.placements["R1"].rotation, 90.0);
+    assert_eq!(q.data.nets.nets["GND"].pads.len(), 2);
+    assert!(q.data.board.outline.is_some());
+    assert!(
+        q.import_kicad_board(ImportKicadBoard {
+            path: out.path,
+            models: false,
+            online: false,
+            replace: false,
+            strict: false
+        })
+        .is_err(),
+        "a second import needs replace"
+    );
+}

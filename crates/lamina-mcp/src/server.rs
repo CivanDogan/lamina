@@ -176,6 +176,51 @@ impl Lamina {
         self.with(|p| Ok(p.status()))
     }
 
+    /// Search KiCad footprint libraries on this machine: `kicad_footprints`
+    /// folders in lamina.json, KICAD*_FOOTPRINT_DIR, standard installs.
+    /// `import_kicad_footprint` with `Library:Name` also works with no local
+    /// library, fetching from the official KiCad libraries online.
+    #[tool(annotations(title = "Search KiCad footprints", read_only_hint = true))]
+    async fn search_kicad_footprints(
+        &self,
+        Parameters(p): Parameters<SearchKicadFootprints>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.search_kicad_footprints(p))
+    }
+
+    /// Import a KiCad footprint and its STEP model from a local library, a
+    /// `.kicad_mod` file, or the official KiCad libraries online
+    /// (`Library:Name`, e.g. `Package_TO_SOT_SMD:SOT-23`), optionally adding
+    /// a part with `refdes`.
+    #[tool(annotations(title = "Import KiCad footprint"))]
+    async fn import_kicad_footprint(
+        &self,
+        Parameters(p): Parameters<ImportKicadFootprint>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.import_kicad_footprint(p))
+    }
+
+    /// Import a `.kicad_pcb` board into the open project: outline, parts
+    /// with footprints, nets, placement, tracks, vias, zones, keep-outs and
+    /// texts. The project must be empty unless `replace` is true.
+    #[tool(annotations(title = "Import KiCad board"))]
+    async fn import_kicad_board(
+        &self,
+        Parameters(p): Parameters<ImportKicadBoard>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.import_kicad_board(p))
+    }
+
+    /// Write the board as a `.kicad_pcb` file that KiCad 8 or newer opens
+    /// (default `output/<name>.kicad_pcb`). Zones are refilled by KiCad.
+    #[tool(annotations(title = "Export KiCad board"))]
+    async fn export_kicad(
+        &self,
+        Parameters(p): Parameters<ExportKicad>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.export_kicad(p))
+    }
+
     /// Build `design.jsonnet` into board.json, parts.json and nets.json and
     /// reload. Every tool also rebuilds automatically when the source or an
     /// imported file changed, so call this to force a build or to see the

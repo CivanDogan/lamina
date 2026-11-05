@@ -1,0 +1,20 @@
+[package]
+name = "lamina-kicad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "KiCad footprint and board file import and export"
+
+[dependencies]
+lamina-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+ureq = { version = "3.5.1", default-features = false, features = ["rustls", "gzip"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

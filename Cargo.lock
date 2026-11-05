@@ -2442,6 +2442,7 @@ dependencies = [
  "lamina-export",
  "lamina-footprint",
  "lamina-geom",
+ "lamina-kicad",
  "lamina-model",
  "lamina-parts",
  "lamina-render",
@@ -2497,6 +2498,18 @@ dependencies = [
  "lamina-model",
  "rstar 0.14.0",
  "serde",
+]
+
+[[package]]
+name = "lamina-kicad"
+version = "0.1.0"
+dependencies = [
+ "lamina-model",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
 ]
 
 [[package]]

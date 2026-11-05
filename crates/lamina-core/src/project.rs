@@ -62,6 +62,7 @@ pub struct Project {
     pub data: ProjectData,
     checkers: Vec<Checker>,
     source: std::sync::Arc<dyn lamina_parts::PartSource>,
+    kicad: std::sync::Arc<dyn lamina_kicad::KicadSource>,
     cached: Option<Vec<Violation>>,
     /// Size and modification time of every project file at the last
     /// load or save, to notice edits made by someone else.
@@ -103,6 +104,7 @@ impl Project {
             data,
             checkers: Vec::new(),
             source: std::sync::Arc::new(lamina_parts::HttpSource::default()),
+            kicad: std::sync::Arc::new(lamina_kicad::HttpSource),
             cached: None,
             stamp: disk_stamp(dir),
             _lock: Some(lock),
@@ -128,6 +130,7 @@ impl Project {
             data,
             checkers: Vec::new(),
             source: std::sync::Arc::new(lamina_parts::HttpSource::default()),
+            kicad: std::sync::Arc::new(lamina_kicad::HttpSource),
             cached: None,
             stamp,
             _lock: None,
@@ -159,6 +162,16 @@ impl Project {
 
     pub fn set_source(&mut self, s: std::sync::Arc<dyn lamina_parts::PartSource>) {
         self.source = s;
+    }
+
+    /// Where KiCad footprints and models are fetched from (the official
+    /// libraries online by default).
+    pub fn kicad_source(&self) -> &dyn lamina_kicad::KicadSource {
+        self.kicad.as_ref()
+    }
+
+    pub fn set_kicad_source(&mut self, s: std::sync::Arc<dyn lamina_kicad::KicadSource>) {
+        self.kicad = s;
     }
 
     /// Add a checker that runs after every change (DRC registers here).
