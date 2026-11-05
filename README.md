@@ -117,6 +117,16 @@ holes and texts. 3D models are fetched from EasyEDA like LCSC imports. Solid
 copper regions (teardrops, hand-drawn copper) are kept as drawings. Rules are
 relaxed to what the board contains; apply a fab preset afterwards.
 
+## Gerbers from any CAD program
+
+`import_gerbers` / `lamina import-gerbers <folder or zip> <dir>` read Gerber
+(RS-274X with X2 attributes, aperture macros, arcs, regions, step and repeat)
+and Excellon drill files, whatever program wrote them. Layers are recognised
+by their X2 file function or by common names (KiCad, Altium/Protel, EasyEDA,
+Eagle). Fab files have no parts or nets, so the board comes in as artwork:
+outline, holes, and copper and silkscreen as drawings, for viewing, rendering
+and checking against the original.
+
 ## External autorouters
 
 `export_specctra` / `lamina export-dsn <dir>` write a Specctra DSN of the
@@ -133,7 +143,8 @@ Existing tracks are exported as protected wiring unless `reroute_all`.
 
 ## Tools
 
-`lamina-step` has two developer examples: `corpus <dir>` loads every STEP file in
+`lamina-export` has `outline <file.gbr> [tolerance]`, which prints the closed
+loops found in a Gerber outline layer. `lamina-step` has two developer examples: `corpus <dir>` loads every STEP file in
 a folder and compares it with the OBJ of the same name, and `lamina-render`'s
 `meshview <model> <out.png>` renders a single model.
 

@@ -1,6 +1,8 @@
 //! Fabrication outputs: Gerber X2, Excellon, JLCPCB BOM and CPL, zip.
 
+pub mod fab_import;
 pub mod gerber;
+pub mod gerber_in;
 pub mod reader;
 
 use std::collections::BTreeMap;

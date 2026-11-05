@@ -120,3 +120,58 @@ fn bom_and_cpl() {
     assert!(cpl.contains("U1,15.0000mm,10.0000mm,Top,90"), "{cpl}");
     assert!(warnings.iter().any(|w| w.contains("U1 has no LCSC")));
 }
+
+/// The general reader agrees with the export-subset reader, and a whole fab
+/// set imports back as a board.
+#[test]
+fn general_reader_and_fab_import() {
+    let d = board();
+    let a = lamina_drc::analyze(&d);
+    let s = lamina_scene::build_2d(&d, &a);
+    let mut files: Vec<(String, Vec<u8>)> = lamina_export::gerbers(&s, "rb")
+        .into_iter()
+        .chain(lamina_export::drills(&a.geometry, "rb"))
+        .map(|f| (f.name, f.contents))
+        .collect();
+    for (name, bytes) in &files {
+        if !name.ends_with(".DRL") {
+            let text = String::from_utf8(bytes.clone()).unwrap();
+            let old = lamina_export::reader::read_gerber(&text).unwrap();
+            let new = lamina_export::gerber_in::read(&text).unwrap().image;
+            let xor = old.xor(&new).unsigned_area();
+            let area = old.unsigned_area().max(1e-9);
+            assert!(xor / area < 0.002, "{name}: xor {xor} vs {area}");
+        }
+    }
+    files.push(("readme.txt".into(), b"not a drill file".to_vec()));
+    let b = lamina_export::fab_import::import(&files, "rb").unwrap();
+    let e = &b.data;
+    assert_eq!(e.board.stackup.copper_layers, 2);
+    let o = e.board.outline.as_ref().unwrap();
+    let want = d.board.outline.as_ref().unwrap().signed_area();
+    assert!(
+        (o.signed_area() - want).abs() / want < 0.001,
+        "{} vs {want}",
+        o.signed_area()
+    );
+    assert_eq!(o.bbox().unwrap().min, Point::new(0.0, 0.0));
+    // Three header holes, plated.
+    assert_eq!(e.board.holes.len(), 3, "{:?}", b.notes);
+    assert!(e.board.holes.iter().all(|h| h.plated));
+    // Copper drawings carry the same area as the exported top layer.
+    let top: f64 = e
+        .routing
+        .graphics
+        .iter()
+        .filter(|g| g.layer == Layer::TOP)
+        .map(|g| lamina_geom::prim::ring_area(&g.shape.points()).abs())
+        .sum();
+    let want_top = model_copper(&a, 0).unsigned_area();
+    assert!(
+        (top - want_top).abs() / want_top < 0.01,
+        "{top} vs {want_top}"
+    );
+    assert!(e.routing.graphics.iter().any(|g| g.layer == Layer::BOTTOM));
+    assert!(e.parts.parts.is_empty() && e.nets.nets.is_empty());
+    assert!(b.layers.values().any(|l| l == "board outline"));
+}

@@ -53,6 +53,8 @@ enum Cmd {
         #[arg(long)]
         no_models: bool,
     },
+    /// Import Gerber and drill files (folder or zip) into a project as artwork.
+    ImportGerbers { path: PathBuf, dir: PathBuf },
     /// Write a Specctra DSN for an external autorouter.
     ExportDsn {
         dir: PathBuf,
@@ -136,6 +138,19 @@ fn main() -> anyhow::Result<()> {
                 models: !no_models,
                 replace: false,
                 strict: false,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
+            Ok(())
+        }
+        Cmd::ImportGerbers { path, dir } => {
+            let name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_string);
+            let mut p = server::open_project(&dir.to_string_lossy(), true, name, false)?;
+            let r = p.import_gerbers(lamina_core::ImportGerbers {
+                path: path.to_string_lossy().to_string(),
+                replace: false,
             })?;
             println!("{}", serde_json::to_string_pretty(&r)?);
             Ok(())

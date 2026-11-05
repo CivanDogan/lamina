@@ -3,7 +3,7 @@ use lamina_model::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::project::Project;
+use crate::project::{OpResult, Project, Touched};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 pub struct Export {
@@ -155,5 +155,72 @@ impl Project {
         }
         self.save_notes(n)?;
         Ok(k)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct ImportGerbers {
+    /// A folder or a zip of Gerber and drill files, from any CAD program.
+    pub path: String,
+    /// Replace a project that already has a board.
+    #[serde(default)]
+    pub replace: bool,
+}
+
+impl Project {
+    /// Read fab outputs as artwork: outline, holes, copper and silkscreen
+    /// drawings, with no parts or nets.
+    pub fn import_gerbers(&mut self, p: ImportGerbers) -> Result<OpResult> {
+        let path = std::path::Path::new(&p.path);
+        let cur = &self.data;
+        let has_board = !cur.parts.parts.is_empty()
+            || !cur.routing.tracks.is_empty()
+            || !cur.routing.graphics.is_empty()
+            || cur.board.outline.is_some();
+        if has_board && !p.replace {
+            return Err(Error::Refused(
+                "the project already has a board; pass replace: true to overwrite it".into(),
+            ));
+        }
+        let files = lamina_export::fab_import::read_files(path).map_err(Error::Invalid)?;
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("board")
+            .trim_end_matches("-gerbers")
+            .to_string();
+        let b = lamina_export::fab_import::import(&files, &name).map_err(Error::Invalid)?;
+        let mut d = b.data;
+        d.notes = self.data.notes.clone();
+        let mut touched = Touched::default();
+        for k in [
+            FileKind::Board,
+            FileKind::Parts,
+            FileKind::Nets,
+            FileKind::Placement,
+            FileKind::Routing,
+        ] {
+            touched.files.insert(k);
+        }
+        for id in self.data.footprints.keys() {
+            touched.removed_footprints.insert(id.clone());
+        }
+        d.footprints.clear();
+        let summary = format!(
+            "imported {} file(s) from {}: {} copper layer(s), {} drawings, {} holes",
+            files.len(),
+            path.display(),
+            d.board.stackup.copper_layers,
+            d.routing.graphics.len(),
+            d.board.holes.len()
+        );
+        let mut res = self.commit(d, touched, false, summary)?;
+        res.notes = b
+            .layers
+            .iter()
+            .map(|(f, l)| format!("{f}: {l}"))
+            .chain(b.notes)
+            .collect();
+        Ok(res)
     }
 }

@@ -17,7 +17,7 @@ pub use kicad::{
 };
 pub use lcsc::{ImportEasyedaBoard, ImportLcsc, ImportMany, SearchPart, natural, today};
 pub use nets::{Connect, Disconnect, SetNets};
-pub use output::{AddNote, Export, Exported, ListNotes, ResolveNotes};
+pub use output::{AddNote, Export, Exported, ImportGerbers, ListNotes, ResolveNotes};
 pub use parts::{
     AddPart, AddParts, BodySize, FootprintFromPackage, FootprintFromPads, FootprintId,
     FootprintSummary, RemovePart, SetModel,

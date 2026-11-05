@@ -245,6 +245,19 @@ impl Lamina {
         self.with(|proj| proj.import_specctra_session(p))
     }
 
+    /// Import Gerber and drill files (a folder or a zip) from any CAD
+    /// program as artwork: board outline, holes, copper and silkscreen as
+    /// drawings. There are no parts or nets in fab files, so the result is
+    /// for viewing, rendering and checking. The project must be empty
+    /// unless `replace` is true.
+    #[tool(annotations(title = "Import Gerbers"))]
+    async fn import_gerbers(
+        &self,
+        Parameters(p): Parameters<ImportGerbers>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.import_gerbers(p))
+    }
+
     /// Write the board as a `.kicad_pcb` file that KiCad 8 or newer opens
     /// (default `output/<name>.kicad_pcb`). Zones are refilled by KiCad.
     #[tool(annotations(title = "Export KiCad board"))]

@@ -556,11 +556,14 @@ pub fn contour_from_points(mut pts: Vec<Point>) -> Option<Contour> {
 /// Start, end and optional arc (centre, counter-clockwise) of a loose edge.
 type Seg = (Point, Point, Option<(Point, bool)>);
 
-/// Join loose edges into closed loops, tolerating the small overlaps and
-/// stubs hand-drawn outlines often have. Ends closer than `tol` (mm) are
-/// taken as joined. Returns the loops and how many edges could not be used.
+/// Join loose edges into closed loops. Edges whose ends coincide (within
+/// 5 µm) are joined first into paths; then the ends of open paths are
+/// bridged, closest first, when they are less than `tol` (mm) apart. A
+/// bridge becomes a short straight edge. Returns the loops and how many
+/// edges could not be used.
 pub fn chain_edges(edges: Vec<Edge>, tol: f64) -> (Vec<Contour>, usize) {
     let tol = tol.max(1e-6);
+    let eps = tol.min(0.005);
     let mut loops = Vec::new();
     let mut pool: Vec<Seg> = Vec::new();
     let mut open = 0;
@@ -568,120 +571,131 @@ pub fn chain_edges(edges: Vec<Edge>, tol: f64) -> (Vec<Contour>, usize) {
         match e {
             Edge::Loop(c) => loops.push(c),
             Edge::Line(a, b) => {
-                if a.dist(b) > tol {
+                if a.dist(b) > eps {
                     pool.push((a, b, None));
-                } else {
-                    open += 1;
                 }
             }
             Edge::Arc { a, b, center, ccw } => {
-                if a.dist(b) > tol {
+                if a.dist(b) > eps {
                     pool.push((a, b, Some((center, ccw))));
-                } else {
-                    open += 1;
                 }
             }
         }
     }
-    let seg_len = |e: &Seg| e.0.dist(e.1);
-    let degree = |pool: &[Seg], p: Point| -> usize {
-        pool.iter()
-            .map(|e| usize::from(e.0.dist(p) < tol) + usize::from(e.1.dist(p) < tol))
-            .sum()
-    };
-    while !pool.is_empty() {
-        // Start from the longest edge, so stubs come last.
-        let start_i = (0..pool.len())
-            .max_by(|&a, &b| seg_len(&pool[a]).total_cmp(&seg_len(&pool[b])))
-            .unwrap();
-        let first = pool.remove(start_i);
-        let start = first.0;
-        let mut chain = vec![first];
-        let mut used: Vec<usize> = Vec::new();
-        let mut end = first.1;
-        let mut closed = false;
-        loop {
-            if end.dist(start) < tol {
-                closed = true;
-                break;
-            }
-            let mut cands: Vec<(usize, bool)> = pool
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| !used.contains(i))
-                .filter_map(|(i, e)| {
-                    if e.0.dist(end) < tol {
-                        Some((i, false))
-                    } else if e.1.dist(end) < tol {
-                        Some((i, true))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if cands.is_empty() {
-                break;
-            }
-            // Prefer an edge that closes the loop, then one whose far end
-            // continues somewhere, then the longer one.
-            let score = |(i, rev): (usize, bool)| {
-                let far = if rev { pool[i].0 } else { pool[i].1 };
-                let closes = far.dist(start) < tol;
-                let continues = degree(&pool, far) >= 2;
-                (
-                    u8::from(closes) * 2 + u8::from(continues),
-                    seg_len(&pool[i]),
-                )
-            };
-            cands.sort_by(|&a, &b| {
-                let (sa, sb) = (score(a), score(b));
-                sb.0.cmp(&sa.0).then(sb.1.total_cmp(&sa.1))
-            });
-            let (i, rev) = cands[0];
-            let e = pool[i];
-            let e = if rev {
-                (e.1, e.0, e.2.map(|(c, ccw)| (c, !ccw)))
-            } else {
-                e
-            };
-            end = e.1;
-            used.push(i);
-            chain.push(e);
-        }
-        if !closed {
-            // The start edge was a stub; the rest stays available.
-            open += 1;
-            continue;
-        }
-        used.sort_unstable_by(|a, b| b.cmp(a));
-        for i in used {
-            pool.remove(i);
-        }
-        // Each edge starts a vertex; where an edge ends short of the next
-        // one, its true end becomes a vertex too, so arcs keep their radius
-        // and a short line bridges the gap.
-        let build = |chain: &[Seg]| {
-            let mut vertices = Vec::new();
-            for (k, (a, b, arc)) in chain.iter().enumerate() {
-                vertices.push(Vertex {
-                    x: a.x,
-                    y: a.y,
-                    arc: arc.map(|(center, ccw)| ArcTo { center, ccw }),
-                });
-                let next = chain[(k + 1) % chain.len()].0;
-                if b.dist(next) > 1e-4 {
-                    vertices.push(Vertex::line(b.x, b.y));
+    let flip = |e: Seg| (e.1, e.0, e.2.map(|(c, ccw)| (c, !ccw)));
+    // The pooled segment with an end nearest `p` (within `eps`), oriented
+    // so that it starts there (`at_start`) or ends there.
+    let take = |pool: &mut Vec<Seg>, p: Point, at_start: bool| -> Option<Seg> {
+        let mut best: Option<(f64, usize, bool)> = None;
+        for (i, e) in pool.iter().enumerate() {
+            for (q, rev) in [(e.0, false), (e.1, true)] {
+                let d = q.dist(p);
+                if d < eps && best.is_none_or(|b| d < b.0) {
+                    best = Some((d, i, rev));
                 }
             }
-            Contour { vertices }
-        };
+        }
+        let (_, i, rev) = best?;
+        let e = pool.swap_remove(i);
+        // `rev` means the matching end is the segment's end.
+        Some(match (at_start, rev) {
+            (true, false) | (false, true) => e,
+            _ => flip(e),
+        })
+    };
+
+    // Stage 1: paths through coinciding ends.
+    let mut paths: Vec<std::collections::VecDeque<Seg>> = Vec::new();
+    while let Some(first) = pool.pop() {
+        let mut path = std::collections::VecDeque::from([first]);
+        loop {
+            let end = path.back().unwrap().1;
+            if path.len() > 1 && end.dist(path.front().unwrap().0) < eps {
+                break;
+            }
+            match take(&mut pool, end, true) {
+                Some(e) => path.push_back(e),
+                None => break,
+            }
+        }
+        let closed = path.len() > 1 && path.back().unwrap().1.dist(path.front().unwrap().0) < eps;
+        if !closed {
+            while let Some(e) = take(&mut pool, path.front().unwrap().0, false) {
+                path.push_front(e);
+                if path.back().unwrap().1.dist(path.front().unwrap().0) < eps {
+                    break;
+                }
+            }
+        }
+        paths.push(path);
+    }
+
+    // Stage 2: bridge the gaps between open paths, closest first.
+    let is_closed = |p: &std::collections::VecDeque<Seg>| {
+        p.len() > 1 && p.back().unwrap().1.dist(p.front().unwrap().0) < eps
+    };
+    let (mut done, mut todo): (Vec<_>, Vec<_>) = paths.into_iter().partition(is_closed);
+    loop {
+        // (distance, path, other path or itself, join to the other's end)
+        let mut best: Option<(f64, usize, usize, bool)> = None;
+        for (i, p) in todo.iter().enumerate() {
+            let end = p.back().unwrap().1;
+            for (j, q) in todo.iter().enumerate() {
+                let start = q.front().unwrap().0;
+                let d = end.dist(start);
+                // Closing a single segment on itself is not a loop.
+                if d < tol && !(i == j && p.len() < 2) && best.is_none_or(|b| d < b.0) {
+                    best = Some((d, i, j, false));
+                }
+                if i != j {
+                    let d = end.dist(q.back().unwrap().1);
+                    if d < tol && best.is_none_or(|b| d < b.0) {
+                        best = Some((d, i, j, true));
+                    }
+                }
+            }
+        }
+        let Some((_, i, j, to_end)) = best else { break };
+        if i == j {
+            done.push(todo.swap_remove(i));
+            continue;
+        }
+        let mut other = todo[j].clone();
+        if to_end {
+            other = other.into_iter().rev().map(flip).collect();
+        }
+        todo[i].extend(other);
+        todo.swap_remove(j);
+        let i = if i == todo.len() { j } else { i };
+        if is_closed(&todo[i]) {
+            done.push(todo.swap_remove(i));
+        }
+    }
+    open += todo.iter().map(|p| p.len()).sum::<usize>();
+
+    // Each edge starts a vertex; where an edge ends short of the next one,
+    // its true end becomes a vertex too, so arcs keep their radius and a
+    // short line bridges the gap.
+    let build = |chain: &[Seg]| {
+        let mut vertices = Vec::new();
+        for (k, (a, b, arc)) in chain.iter().enumerate() {
+            vertices.push(Vertex {
+                x: a.x,
+                y: a.y,
+                arc: arc.map(|(center, ccw)| ArcTo { center, ccw }),
+            });
+            let next = chain[(k + 1) % chain.len()].0;
+            if b.dist(next) > 1e-4 {
+                vertices.push(Vertex::line(b.x, b.y));
+            }
+        }
+        Contour { vertices }
+    };
+    for path in done {
+        let chain: Vec<Seg> = path.into_iter().collect();
         let mut c = build(&chain);
         if c.signed_area() < 0.0 {
-            let rev: Vec<Seg> = chain
-                .iter()
-                .rev()
-                .map(|(a, b, arc)| (*b, *a, arc.map(|(c, ccw)| (c, !ccw))))
-                .collect();
+            let rev: Vec<Seg> = chain.iter().rev().map(|e| flip(*e)).collect();
             c = build(&rev);
         }
         loops.push(c);
