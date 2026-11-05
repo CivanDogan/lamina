@@ -192,3 +192,57 @@ fn ids() {
     assert_eq!(next_id("t", ["t1", "t9", "x3", "t10"]), "t11");
     assert_eq!(next_id("v", []), "v1");
 }
+
+#[test]
+fn import_from_fixtures() {
+    let (_t, mut p) = new_project();
+    let fx =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../lamina-parts/tests/fixtures");
+    p.set_source(std::sync::Arc::new(lamina_parts::DirSource { dir: fx }));
+    let r = p
+        .import_lcsc(ImportLcsc {
+            lcsc: "C6186".into(),
+            refdes: Some("U3".into()),
+            value: None,
+            footprint_id: None,
+            refresh: false,
+            step: false,
+            replace: false,
+            strict: true,
+        })
+        .unwrap();
+    assert!(r.summary.contains("basic"), "{}", r.summary);
+    assert!(
+        r.notes.iter().any(|n| n.contains("3D model")),
+        "{:?}",
+        r.notes
+    );
+    let part = &p.data.parts.parts["U3"];
+    assert_eq!(part.lcsc.as_deref(), Some("C6186"));
+    let fp = &p.data.footprints[&part.footprint];
+    let m = fp.model.as_ref().unwrap();
+    assert!(p.root().join("cache/models").join(&m.file).is_file());
+    assert!(p.root().join("cache/parts/C6186.json").is_file());
+    // Second import reuses the cached footprint and adds another part.
+    let r = p
+        .import_lcsc(ImportLcsc {
+            lcsc: "C6186".into(),
+            refdes: Some("U4".into()),
+            value: Some("3V3 LDO".into()),
+            footprint_id: None,
+            refresh: false,
+            step: false,
+            replace: false,
+            strict: false,
+        })
+        .unwrap();
+    assert!(r.notes.iter().any(|n| n.contains("kept as is")));
+    assert_eq!(p.data.parts.parts["U4"].value.as_deref(), Some("3V3 LDO"));
+}
+
+#[test]
+fn date_format() {
+    let d = today();
+    assert_eq!(d.len(), 10);
+    assert!(d.starts_with("20"));
+}

@@ -61,6 +61,7 @@ pub struct Project {
     root: PathBuf,
     pub data: ProjectData,
     checkers: Vec<Checker>,
+    source: std::sync::Arc<dyn lamina_parts::PartSource>,
     _lock: Lock,
 }
 
@@ -97,6 +98,7 @@ impl Project {
             root: dir.to_path_buf(),
             data,
             checkers: Vec::new(),
+            source: std::sync::Arc::new(lamina_parts::HttpSource::default()),
             _lock: lock,
         })
     }
@@ -108,12 +110,22 @@ impl Project {
             root: dir.to_path_buf(),
             data,
             checkers: Vec::new(),
+            source: std::sync::Arc::new(lamina_parts::HttpSource::default()),
             _lock: lock,
         })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Where part searches and imports go (HTTP by default).
+    pub fn source(&self) -> &dyn lamina_parts::PartSource {
+        self.source.as_ref()
+    }
+
+    pub fn set_source(&mut self, s: std::sync::Arc<dyn lamina_parts::PartSource>) {
+        self.source = s;
     }
 
     /// Add a checker that runs after every change (DRC registers here).

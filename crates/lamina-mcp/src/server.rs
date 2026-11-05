@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use lamina_core::model::{self, Severity};
 use lamina_core::{
     AddPart, AddParts, Connect, Disconnect, FootprintFromPackage, FootprintFromPads, FootprintId,
-    Project, RemovePart, SetNets, SetOutline, SetRules, SetStackup,
+    ImportLcsc, ImportMany, Project, RemovePart, SearchPart, SetNets, SetOutline, SetRules,
+    SetStackup,
 };
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -330,6 +331,34 @@ impl Lamina {
         Parameters(p): Parameters<RemovePart>,
     ) -> Result<CallToolResult, McpError> {
         self.with(|proj| proj.remove_part(p))
+    }
+    /// Search LCSC / JLCPCB parts by keyword, MPN or LCSC number. Results show
+    /// package, stock, price and whether it is a JLCPCB basic part.
+    #[tool(annotations(title = "Search parts", read_only_hint = true, open_world_hint = true))]
+    async fn search_part(
+        &self,
+        Parameters(p): Parameters<SearchPart>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.search_part(p))
+    }
+
+    /// Import an LCSC part: converts its EasyEDA footprint, downloads the 3D
+    /// model, caches everything in the project, and optionally adds a part.
+    #[tool(annotations(title = "Import LCSC part", open_world_hint = true))]
+    async fn import_lcsc(
+        &self,
+        Parameters(p): Parameters<ImportLcsc>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.import_lcsc(p))
+    }
+
+    /// Import several LCSC parts in one call.
+    #[tool(annotations(title = "Import LCSC parts", open_world_hint = true))]
+    async fn import_lcsc_many(
+        &self,
+        Parameters(p): Parameters<ImportMany>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.import_many(p))
     }
 }
 
