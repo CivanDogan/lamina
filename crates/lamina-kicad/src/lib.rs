@@ -6,7 +6,8 @@ pub mod footprint;
 pub mod layers;
 pub mod library;
 pub mod pcb;
-pub mod sexpr;
+
+pub use lamina_model::sexpr;
 
 pub use footprint::{Instance, KicadModel, convert, footprint_id, parse_footprint};
 pub use library::{DirSource, Hit, HttpSource, KicadSource};

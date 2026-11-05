@@ -11,6 +11,7 @@ pub mod geom;
 pub mod json;
 pub mod layer;
 pub mod project;
+pub mod sexpr;
 pub mod workspace;
 
 pub use error::Error;

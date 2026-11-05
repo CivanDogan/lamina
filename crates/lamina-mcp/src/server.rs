@@ -224,6 +224,27 @@ impl Lamina {
         self.with(|proj| proj.import_easyeda_board(p))
     }
 
+    /// Write a Specctra DSN of the board for an external autorouter such as
+    /// Freerouting (default `output/<name>.dsn`). Existing routes go out as
+    /// protected wiring unless `reroute_all`.
+    #[tool(annotations(title = "Export Specctra DSN"))]
+    async fn export_specctra(
+        &self,
+        Parameters(p): Parameters<ExportSpecctra>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.export_specctra(p))
+    }
+
+    /// Read the `.ses` session a Specctra router wrote and put its tracks
+    /// and vias on the board, replacing the routes of those nets.
+    #[tool(annotations(title = "Import Specctra session"))]
+    async fn import_specctra_session(
+        &self,
+        Parameters(p): Parameters<ImportSpecctraSession>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.import_specctra_session(p))
+    }
+
     /// Write the board as a `.kicad_pcb` file that KiCad 8 or newer opens
     /// (default `output/<name>.kicad_pcb`). Zones are refilled by KiCad.
     #[tool(annotations(title = "Export KiCad board"))]

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use lamina_model::*;
 
 use crate::layers::{FpLayerMap, fp_layer_from_kicad};
-use crate::sexpr::{self, Sx};
+use lamina_model::sexpr::{self, Sx};
 
 /// A footprint read from KiCad, with what a board instance adds.
 #[derive(Debug, Clone)]

@@ -6,7 +6,7 @@ use lamina_model::*;
 
 use crate::footprint::{self, Instance, KicadModel, arc_from_three, points_from, shape_from};
 use crate::layers::{fp_layer_to_kicad, layer_from_kicad, layer_table, layer_to_kicad};
-use crate::sexpr::{self, Node, Sx, n};
+use lamina_model::sexpr::{self, Node, Sx, n};
 
 /// A board read from KiCad.
 #[derive(Debug)]

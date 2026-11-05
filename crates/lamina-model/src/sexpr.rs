@@ -1,4 +1,5 @@
-//! KiCad s-expressions: a small reader and a writer in KiCad's layout.
+//! S-expressions as KiCad and Specctra use them: a small reader and a
+//! writer in KiCad's layout.
 
 use std::fmt::Write as _;
 
@@ -243,6 +244,13 @@ impl Parser<'_> {
                         Some(b')') => {
                             self.i += 1;
                             return Ok(Sx::List(items));
+                        }
+                        // Specctra's `(string_quote ")` names the quote character itself.
+                        Some(b'"')
+                            if items.len() == 1 && items[0].text() == Some("string_quote") =>
+                        {
+                            self.i += 1;
+                            items.push(Sx::sym("\""));
                         }
                         _ => items.push(self.value()?),
                     }

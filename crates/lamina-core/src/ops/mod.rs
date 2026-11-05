@@ -7,6 +7,7 @@ pub mod parts;
 pub mod place;
 pub mod render;
 pub mod route;
+pub mod specctra;
 pub mod status;
 
 pub use board::{RectSpec, SetOutline, SetRules, SetStackup, UseFabPreset};
@@ -29,4 +30,5 @@ pub use render::{Render, RenderView, Rendered, parse_scene_layer};
 pub use route::{
     AddHole, AddKeepout, AddText, AddVia, AddZone, Autoroute, DeleteItems, Ripup, RouteTrace,
 };
+pub use specctra::{ExportSpecctra, ImportSpecctraSession, SpecctraExported};
 pub use status::Status;

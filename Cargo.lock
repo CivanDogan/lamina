@@ -2448,6 +2448,7 @@ dependencies = [
  "lamina-render",
  "lamina-route",
  "lamina-scene",
+ "lamina-specctra",
  "lamina-step",
  "schemars",
  "serde",
@@ -2589,6 +2590,16 @@ dependencies = [
  "lamina-footprint",
  "lamina-geom",
  "lamina-model",
+]
+
+[[package]]
+name = "lamina-specctra"
+version = "0.1.0"
+dependencies = [
+ "lamina-kicad",
+ "lamina-model",
+ "schemars",
+ "serde",
 ]
 
 [[package]]

@@ -53,6 +53,17 @@ enum Cmd {
         #[arg(long)]
         no_models: bool,
     },
+    /// Write a Specctra DSN for an external autorouter.
+    ExportDsn {
+        dir: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Leave existing routes out.
+        #[arg(long)]
+        reroute_all: bool,
+    },
+    /// Read a Specctra session (.ses) back into a project.
+    ImportSes { file: PathBuf, dir: PathBuf },
     /// Write a project as a .kicad_pcb file.
     ExportKicad {
         dir: PathBuf,
@@ -124,6 +135,29 @@ fn main() -> anyhow::Result<()> {
                 path: file.to_string_lossy().to_string(),
                 models: !no_models,
                 replace: false,
+                strict: false,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
+            Ok(())
+        }
+        Cmd::ExportDsn {
+            dir,
+            out,
+            reroute_all,
+        } => {
+            let p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
+            let r = p.export_specctra(lamina_core::ExportSpecctra {
+                path: out.map(|o| o.to_string_lossy().to_string()),
+                reroute_all,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
+            Ok(())
+        }
+        Cmd::ImportSes { file, dir } => {
+            let mut p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
+            let r = p.import_specctra_session(lamina_core::ImportSpecctraSession {
+                path: file.to_string_lossy().to_string(),
+                replace: true,
                 strict: false,
             })?;
             println!("{}", serde_json::to_string_pretty(&r)?);

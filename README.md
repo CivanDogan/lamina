@@ -117,6 +117,20 @@ holes and texts. 3D models are fetched from EasyEDA like LCSC imports. Solid
 copper regions (teardrops, hand-drawn copper) are kept as drawings. Rules are
 relaxed to what the board contains; apply a fab preset afterwards.
 
+## External autorouters
+
+`export_specctra` / `lamina export-dsn <dir>` write a Specctra DSN of the
+board, and `import_specctra_session` / `lamina import-ses <file.ses> <dir>`
+read the session back. With [Freerouting](https://github.com/freerouting/freerouting):
+
+```
+lamina export-dsn boards/servo
+java -jar freerouting.jar -de boards/servo/output/esp32-servo.dsn -do boards/servo/output/esp32-servo.ses
+lamina import-ses boards/servo/output/esp32-servo.ses boards/servo
+```
+
+Existing tracks are exported as protected wiring unless `reroute_all`.
+
 ## Tools
 
 `lamina-step` has two developer examples: `corpus <dir>` loads every STEP file in

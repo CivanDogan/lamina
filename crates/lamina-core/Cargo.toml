@@ -19,6 +19,7 @@ lamina-export.workspace = true
 lamina-step.workspace = true
 lamina-build.workspace = true
 lamina-kicad.workspace = true
+lamina-specctra.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
