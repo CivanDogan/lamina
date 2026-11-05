@@ -12,7 +12,7 @@ pub mod json;
 pub mod layer;
 pub mod project;
 
-pub use error::{Error, Result};
+pub use error::Error;
 pub use files::*;
 pub use footprint::*;
 pub use geom::*;

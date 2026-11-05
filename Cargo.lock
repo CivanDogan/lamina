@@ -513,6 +513,7 @@ dependencies = [
 name = "lamina-core"
 version = "0.1.0"
 dependencies = [
+ "lamina-footprint",
  "lamina-model",
  "schemars",
  "serde",
@@ -532,6 +533,12 @@ version = "0.1.0"
 [[package]]
 name = "lamina-footprint"
 version = "0.1.0"
+dependencies = [
+ "lamina-model",
+ "schemars",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "lamina-geom"

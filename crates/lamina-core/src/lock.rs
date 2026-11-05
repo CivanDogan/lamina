@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use lamina_model::{Error, Result};
+use lamina_model::error::{Error, Result};
 
 pub const LOCK_FILE: &str = ".lamina.lock";
 

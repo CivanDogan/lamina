@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use lamina_core::model::{self, Severity};
-use lamina_core::{Connect, Disconnect, Project, SetNets, SetOutline, SetRules, SetStackup};
+use lamina_core::{
+    AddPart, AddParts, Connect, Disconnect, FootprintFromPackage, FootprintFromPads, FootprintId,
+    Project, RemovePart, SetNets, SetOutline, SetRules, SetStackup,
+};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
@@ -263,6 +266,70 @@ impl Lamina {
         Parameters(p): Parameters<Disconnect>,
     ) -> Result<CallToolResult, McpError> {
         self.with(|proj| proj.disconnect(p))
+    }
+    /// Generate an IPC-7351 footprint from a package name. Names: `R_0402`,
+    /// `R_0603`, `C_0805`, `LED_0603`, `D_SOD-123`, `SOT-23`, `SOT-23-5`,
+    /// `SOT-23-6`, `SOT-223`, `SOIC-8`, `SOIC-16W`, `TSSOP-28`, `SSOP-20`,
+    /// `MSOP-10`, `QFN-32_5x5_P0.5_EP3.3x3.3`, `DFN-8_3x3_P0.65`,
+    /// `LQFP-48_7x7_P0.5`, `PinHeader_1x03_P2.54`, `BGA-64_8x8_P0.8_5x5`.
+    #[tool(annotations(title = "Footprint from package"))]
+    async fn footprint_from_package(
+        &self,
+        Parameters(p): Parameters<FootprintFromPackage>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.footprint_from_package(p))
+    }
+
+    /// Create a footprint from pads typed in from a datasheet land pattern.
+    /// Courtyard, fab outline and silkscreen are added when no courtyard is given.
+    #[tool(annotations(title = "Footprint from pads"))]
+    async fn footprint_from_pads(
+        &self,
+        Parameters(p): Parameters<FootprintFromPads>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.footprint_from_pads(p))
+    }
+
+    /// Full footprint JSON: pads, graphics, model, provenance.
+    #[tool(annotations(title = "Get footprint", read_only_hint = true))]
+    async fn get_footprint(
+        &self,
+        Parameters(p): Parameters<FootprintId>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.get_footprint(&p.id))
+    }
+
+    /// Footprints in the project with pad count, source and users.
+    #[tool(annotations(title = "List footprints", read_only_hint = true))]
+    async fn list_footprints(&self) -> Result<CallToolResult, McpError> {
+        self.with(|proj| Ok(proj.list_footprints()))
+    }
+
+    /// Add a part (refdes, footprint id, value, MPN, LCSC number).
+    #[tool(annotations(title = "Add part"))]
+    async fn add_part(
+        &self,
+        Parameters(p): Parameters<AddPart>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.add_part(p))
+    }
+
+    /// Add several parts at once.
+    #[tool(annotations(title = "Add parts"))]
+    async fn add_parts(
+        &self,
+        Parameters(p): Parameters<AddParts>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.add_parts(p))
+    }
+
+    /// Remove a part, its placement and (by default) its pads from nets.
+    #[tool(annotations(title = "Remove part"))]
+    async fn remove_part(
+        &self,
+        Parameters(p): Parameters<RemovePart>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.remove_part(p))
     }
 }
 

@@ -1,0 +1,297 @@
+use std::collections::BTreeMap;
+
+use lamina_footprint::{Density, Options};
+use lamina_model::error::Result;
+use lamina_model::*;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+use crate::project::{OpResult, Project, Touched};
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct FootprintFromPackage {
+    /// Package name, e.g. `R_0603`, `SOIC-8`, `TSSOP-28`, `SOT-223`,
+    /// `QFN-32_5x5_P0.5_EP3.3x3.3`, `LQFP-48_7x7_P0.5`, `PinHeader_1x03_P2.54`.
+    pub package: String,
+    /// IPC density level A (most), B (nominal, default) or C (least).
+    #[serde(default)]
+    pub density: Option<Density>,
+    /// Footprint id; defaults to the package name.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Replace an existing footprint with the same id.
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct BodySize {
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct FootprintFromPads {
+    pub id: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Pads in footprint coordinates (top view, origin at the part centre).
+    pub pads: Vec<Pad>,
+    /// Body outline size for courtyard, silk and fab drawing.
+    #[serde(default)]
+    pub body: Option<BodySize>,
+    /// Body height in mm.
+    #[serde(default)]
+    pub height: Option<f64>,
+    /// Extra graphics; when they include a courtyard none is generated.
+    #[serde(default)]
+    pub graphics: Vec<FpGraphic>,
+    #[serde(default)]
+    pub keepouts: Vec<FpKeepout>,
+    /// Where the numbers came from, e.g. `{"source": "datasheet", "document": "PCA9685 rev 4", "page": 48}`.
+    pub provenance: Provenance,
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct FootprintId {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct AddPart {
+    /// Reference designator, e.g. `R1`, `U2`.
+    pub refdes: String,
+    /// Footprint id in the project.
+    pub footprint: String,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub mpn: Option<String>,
+    #[serde(default)]
+    pub manufacturer: Option<String>,
+    /// LCSC part number, e.g. `C25804`.
+    #[serde(default)]
+    pub lcsc: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub dnp: bool,
+    #[serde(default)]
+    pub fields: BTreeMap<String, String>,
+    /// Replace an existing part with the same refdes.
+    #[serde(default)]
+    pub replace: bool,
+    #[serde(default)]
+    pub strict: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct AddParts {
+    pub parts: Vec<AddPart>,
+    #[serde(default)]
+    pub strict: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct RemovePart {
+    pub refdes: String,
+    /// Also remove its pads from nets (default true).
+    #[serde(default = "yes")]
+    pub remove_from_nets: bool,
+    #[serde(default)]
+    pub strict: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct FootprintSummary {
+    pub id: String,
+    pub pads: usize,
+    pub source: String,
+    pub size: Option<Rect>,
+    pub has_model: bool,
+    pub used_by: Vec<String>,
+}
+
+impl Project {
+    fn store_footprint(
+        &mut self,
+        fp: Footprint,
+        overwrite: bool,
+        summary: String,
+    ) -> Result<OpResult> {
+        if !valid_id(&fp.id) {
+            return Err(Error::invalid(format!(
+                "footprint id `{}` must use letters, digits, . _ -",
+                fp.id
+            )));
+        }
+        if self.data.footprints.contains_key(&fp.id) && !overwrite {
+            return Err(Error::invalid(format!(
+                "footprint `{}` exists; pass overwrite: true to replace it",
+                fp.id
+            )));
+        }
+        let id = fp.id.clone();
+        let mut d = self.data.clone();
+        d.footprints.insert(id.clone(), fp);
+        self.commit(d, Touched::default().footprint(id), false, summary)
+    }
+
+    pub fn footprint_from_package(&mut self, p: FootprintFromPackage) -> Result<OpResult> {
+        let opt = Options {
+            density: p.density.unwrap_or_default(),
+            silk_width: self.data.board.rules.silk_width,
+            silk_to_pad: self.data.board.rules.silk_to_pad,
+        };
+        let fp = lamina_footprint::from_package(&p.package, &opt, p.id.as_deref())
+            .map_err(Error::Invalid)?;
+        let summary = format!(
+            "footprint `{}`: {} pads from IPC-7351 {}",
+            fp.id,
+            fp.pads.len(),
+            p.package
+        );
+        self.store_footprint(fp, p.overwrite, summary)
+    }
+
+    pub fn footprint_from_pads(&mut self, p: FootprintFromPads) -> Result<OpResult> {
+        let mut fp = Footprint::new(p.id, p.provenance);
+        fp.description = p.description;
+        fp.pads = p.pads;
+        fp.graphics = p.graphics;
+        fp.keepouts = p.keepouts;
+        fp.height = p.height;
+        for k in &fp.keepouts {
+            k.outline
+                .check()
+                .map_err(|e| Error::invalid(format!("keepout: {e}")))?;
+        }
+        let opt = Options {
+            silk_width: self.data.board.rules.silk_width,
+            silk_to_pad: self.data.board.rules.silk_to_pad,
+            ..Options::default()
+        };
+        let fp = lamina_footprint::from_pads(fp, p.body.map(|b| (b.width, b.height)), &opt)
+            .map_err(Error::Invalid)?;
+        let summary = format!("footprint `{}`: {} pads", fp.id, fp.pads.len());
+        self.store_footprint(fp, p.overwrite, summary)
+    }
+
+    pub fn get_footprint(&self, id: &str) -> Result<Footprint> {
+        self.data
+            .footprints
+            .get(id)
+            .cloned()
+            .ok_or_else(|| Error::invalid(format!("no footprint `{id}`")))
+    }
+
+    pub fn list_footprints(&self) -> Vec<FootprintSummary> {
+        self.data
+            .footprints
+            .values()
+            .map(|f| FootprintSummary {
+                id: f.id.clone(),
+                pads: f.pads.len(),
+                source: match &f.provenance {
+                    Provenance::Ipc7351 { package, .. } => format!("ipc7351 {package}"),
+                    Provenance::Datasheet { document, .. } => format!("datasheet {document}"),
+                    Provenance::Lcsc { part, .. } => format!("lcsc {part}"),
+                    Provenance::Manual { .. } => "manual".into(),
+                },
+                size: f.courtyard_bbox(),
+                has_model: f.model.is_some(),
+                used_by: self
+                    .data
+                    .parts
+                    .parts
+                    .iter()
+                    .filter(|(_, p)| p.footprint == f.id)
+                    .map(|(r, _)| r.clone())
+                    .collect(),
+            })
+            .collect()
+    }
+
+    fn insert_part(d: &mut ProjectData, p: AddPart) -> Result<String> {
+        if !valid_refdes(&p.refdes) {
+            return Err(Error::invalid(format!(
+                "bad refdes `{}`: start with a letter, then letters, digits, _ or -",
+                p.refdes
+            )));
+        }
+        if !d.footprints.contains_key(&p.footprint) {
+            return Err(Error::invalid(format!(
+                "no footprint `{}`; create it first (footprint_from_package, footprint_from_pads or import_lcsc)",
+                p.footprint
+            )));
+        }
+        if d.parts.parts.contains_key(&p.refdes) && !p.replace {
+            return Err(Error::invalid(format!(
+                "{} exists; pass replace: true to change it",
+                p.refdes
+            )));
+        }
+        let part = Part {
+            footprint: p.footprint,
+            value: p.value,
+            mpn: p.mpn,
+            manufacturer: p.manufacturer,
+            lcsc: p.lcsc,
+            description: p.description,
+            dnp: p.dnp,
+            fields: p.fields,
+        };
+        d.parts.parts.insert(p.refdes.clone(), part);
+        Ok(p.refdes)
+    }
+
+    pub fn add_part(&mut self, p: AddPart) -> Result<OpResult> {
+        let strict = p.strict;
+        let mut d = self.data.clone();
+        let r = Self::insert_part(&mut d, p)?;
+        self.commit(
+            d,
+            Touched::file(FileKind::Parts),
+            strict,
+            format!("part {r} added"),
+        )
+    }
+
+    pub fn add_parts(&mut self, p: AddParts) -> Result<OpResult> {
+        let mut d = self.data.clone();
+        let mut names = Vec::new();
+        for part in p.parts {
+            names.push(Self::insert_part(&mut d, part)?);
+        }
+        self.commit(
+            d,
+            Touched::file(FileKind::Parts),
+            p.strict,
+            format!("{} part(s) added: {}", names.len(), names.join(" ")),
+        )
+    }
+
+    pub fn remove_part(&mut self, p: RemovePart) -> Result<OpResult> {
+        let mut d = self.data.clone();
+        if d.parts.parts.remove(&p.refdes).is_none() {
+            return Err(Error::invalid(format!("no part {}", p.refdes)));
+        }
+        let mut t = Touched::file(FileKind::Parts);
+        if d.placement.placements.remove(&p.refdes).is_some() {
+            t = t.and(FileKind::Placement);
+        }
+        if p.remove_from_nets {
+            for net in d.nets.nets.values_mut() {
+                net.pads.retain(|x| x.part != p.refdes);
+            }
+            t = t.and(FileKind::Nets);
+        }
+        self.commit(d, t, p.strict, format!("part {} removed", p.refdes))
+    }
+}

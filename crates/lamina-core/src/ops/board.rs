@@ -1,3 +1,4 @@
+use lamina_model::error::Result;
 use lamina_model::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

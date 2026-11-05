@@ -8,6 +8,7 @@ description = "Lamina project operations"
 
 [dependencies]
 lamina-model.workspace = true
+lamina-footprint.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true

@@ -7,6 +7,6 @@ pub mod project;
 pub mod validate;
 
 pub use lamina_model as model;
-pub use lamina_model::{Error, Result};
+pub use lamina_model::error::{Error, Result};
 pub use ops::*;
 pub use project::{OpResult, Project, Touched, next_id};
