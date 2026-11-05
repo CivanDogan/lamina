@@ -4,8 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+description = "Copper geometry, distances and polygon operations for Lamina"
 
 [dependencies]
+lamina-model.workspace = true
+serde.workspace = true
+geo = "0.33.1"
+rstar = "0.14.0"
 
 [lints]
 workspace = true

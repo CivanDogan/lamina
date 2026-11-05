@@ -1,0 +1,319 @@
+//! Copper pour fill: zone outline minus everything it must keep clear of,
+//! with thermal spokes to its own pads and unconnected islands removed.
+
+use geo::{Area, BooleanOps, Buffer, Coord, LineString, MultiPolygon, Polygon};
+use lamina_model::*;
+use serde::{Deserialize, Serialize};
+
+use crate::board::{BoardGeometry, Owner};
+use crate::prim::{Prim, capsule_points, circle_points};
+
+const TOL: f64 = 0.005;
+
+fn ring(pts: &[Point]) -> LineString<f64> {
+    let mut v: Vec<Coord<f64>> = pts.iter().map(|p| Coord { x: p.x, y: p.y }).collect();
+    if let Some(f) = v.first().copied() {
+        v.push(f);
+    }
+    LineString::new(v)
+}
+
+fn gpoly(pts: &[Point]) -> Polygon<f64> {
+    Polygon::new(ring(pts), vec![])
+}
+
+fn mp(p: Polygon<f64>) -> MultiPolygon<f64> {
+    MultiPolygon::new(vec![p])
+}
+
+/// Prim grown by `d` (exact for circles and capsules).
+pub fn inflate(p: &Prim, d: f64) -> MultiPolygon<f64> {
+    match p {
+        Prim::Circle { c, r } => mp(gpoly(&circle_points(*c, r + d, TOL))),
+        Prim::Capsule { a, b, r } => mp(gpoly(&capsule_points(*a, *b, r + d, TOL))),
+        Prim::Poly { outer, holes } => {
+            let poly = Polygon::new(ring(outer), holes.iter().map(|h| ring(h)).collect());
+            if d.abs() < 1e-9 {
+                mp(poly)
+            } else {
+                poly.buffer(d)
+            }
+        }
+    }
+}
+
+fn union_all(items: Vec<MultiPolygon<f64>>) -> MultiPolygon<f64> {
+    // Pairwise tree union keeps each step small.
+    let mut layer = items;
+    while layer.len() > 1 {
+        let mut next = Vec::with_capacity(layer.len().div_ceil(2));
+        let mut it = layer.into_iter();
+        while let Some(a) = it.next() {
+            match it.next() {
+                Some(b) => next.push(a.union(&b)),
+                None => next.push(a),
+            }
+        }
+        layer = next;
+    }
+    layer.pop().unwrap_or_else(|| MultiPolygon::new(vec![]))
+}
+
+fn to_prims(m: &MultiPolygon<f64>) -> Vec<Prim> {
+    m.0.iter()
+        .filter(|p| p.unsigned_area() > 1e-6)
+        .map(|p| {
+            let conv = |ls: &LineString<f64>| -> Vec<Point> {
+                let mut v: Vec<Point> = ls.0.iter().map(|c| Point::new(c.x, c.y)).collect();
+                if v.len() > 1 && v.first() == v.last() {
+                    v.pop();
+                }
+                v
+            };
+            let mut outer = conv(p.exterior());
+            if crate::prim::ring_area(&outer) < 0.0 {
+                outer.reverse();
+            }
+            let holes = p
+                .interiors()
+                .iter()
+                .map(|h| {
+                    let mut v = conv(h);
+                    if crate::prim::ring_area(&v) > 0.0 {
+                        v.reverse();
+                    }
+                    v
+                })
+                .collect();
+            Prim::Poly { outer, holes }
+        })
+        .collect()
+}
+
+/// Computed fill of one zone on one layer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ZoneFill {
+    pub zone: String,
+    pub net: Option<String>,
+    pub layer: Layer,
+    pub polygons: Vec<FillPolygon>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FillPolygon {
+    pub outer: Vec<Point>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holes: Vec<Vec<Point>>,
+}
+
+impl FillPolygon {
+    pub fn prim(&self) -> Prim {
+        Prim::Poly {
+            outer: self.outer.clone(),
+            holes: self.holes.clone(),
+        }
+    }
+}
+
+/// Fill every zone. Higher priority zones fill first and are obstacles for
+/// lower priority zones of other nets.
+pub fn fill_zones(d: &ProjectData, g: &BoardGeometry) -> Vec<ZoneFill> {
+    let rules = &d.board.rules;
+    let layers = g.layers;
+    let class_of = |net: &Option<String>| {
+        net.as_ref()
+            .and_then(|n| d.nets.nets.get(n))
+            .and_then(|n| n.class.clone())
+    };
+    let Some(outline) = &g.outline else {
+        return Vec::new();
+    };
+    let board = {
+        let mut b = mp(gpoly(outline)).buffer(-rules.copper_to_edge);
+        for c in &g.cutouts {
+            b = b.difference(&mp(gpoly(c)).buffer(rules.copper_to_edge));
+        }
+        b
+    };
+
+    let mut zones: Vec<&Zone> = d.routing.zones.iter().collect();
+    zones.sort_by(|a, b| b.priority.cmp(&a.priority).then(a.id.cmp(&b.id)));
+    let mut done: Vec<(u8, Option<String>, MultiPolygon<f64>)> = Vec::new();
+    let mut out = Vec::new();
+
+    for z in zones {
+        let zc = z.clearance.unwrap_or(rules.clearance);
+        let zone_class = class_of(&z.net);
+        let min_w = z.min_width.unwrap_or(rules.min_track_width).max(0.05);
+        for layer in &z.layers {
+            let Some(c) = layer.copper() else { continue };
+            let l = c.index(layers);
+            let region = mp(gpoly(&z.outline.flatten(TOL))).intersection(&board);
+            if region.unsigned_area() < 1e-6 {
+                continue;
+            }
+            let rb = bbox_of(&region);
+            let mut obstacles = Vec::new();
+            let mut thermal = Vec::new();
+            let mut anchors = Vec::new();
+            for it in g.copper.iter().filter(|i| i.layer == l) {
+                let b = it.prim.bbox();
+                if b.max.x < rb.min.x - 2.0
+                    || b.min.x > rb.max.x + 2.0
+                    || b.max.y < rb.min.y - 2.0
+                    || b.min.y > rb.max.y + 2.0
+                {
+                    continue;
+                }
+                let same = z.net.is_some() && it.net == z.net;
+                if same {
+                    anchors.push(it.prim.clone());
+                    if matches!(it.owner, Owner::Pad { .. }) {
+                        match z.pad_connection {
+                            PadConnection::Solid => {}
+                            PadConnection::Thermal => {
+                                obstacles.push(inflate(&it.prim, z.thermal_gap));
+                                thermal.push(it.prim.clone());
+                            }
+                            PadConnection::None => obstacles.push(inflate(&it.prim, zc)),
+                        }
+                    }
+                } else {
+                    let cl = zc
+                        .max(rules.clearance_for(class_of(&it.net).as_deref()))
+                        .max(rules.clearance_for(zone_class.as_deref()));
+                    obstacles.push(inflate(&it.prim, cl));
+                }
+            }
+            for dr in &g.drills {
+                if !dr.plated {
+                    obstacles.push(inflate(&dr.prim, zc));
+                }
+            }
+            for k in &d.routing.keepouts {
+                if k.forbid.pours && k.layers.contains(layer) {
+                    obstacles.push(mp(gpoly(&k.outline.flatten(TOL))));
+                }
+            }
+            for (refdes, pl) in &d.placement.placements {
+                let Some(fp) = d
+                    .parts
+                    .parts
+                    .get(refdes)
+                    .and_then(|p| d.footprints.get(&p.footprint))
+                else {
+                    continue;
+                };
+                for (ls, pts, forbid) in crate::board::part_keepouts(fp, pl, layers) {
+                    if forbid.pours && ls.contains(&l) {
+                        obstacles.push(mp(gpoly(&pts)));
+                    }
+                }
+            }
+            for (dl, dnet, fill) in &done {
+                if *dl == l && (dnet != &z.net || z.net.is_none()) {
+                    obstacles.push(fill.buffer(zc));
+                }
+            }
+
+            let blocked = union_all(obstacles);
+            let mut fill = region.difference(&blocked);
+            // Drop necks thinner than the minimum width.
+            fill = fill.buffer(-min_w / 2.0).buffer(min_w / 2.0);
+
+            if !thermal.is_empty() {
+                let allowed = region.difference(&union_all(
+                    g.copper
+                        .iter()
+                        .filter(|i| i.layer == l && !(z.net.is_some() && i.net == z.net))
+                        .map(|i| {
+                            inflate(
+                                &i.prim,
+                                zc.max(rules.clearance_for(class_of(&i.net).as_deref())),
+                            )
+                        })
+                        .collect(),
+                ));
+                let spoke = z.thermal_spoke.max(min_w);
+                let mut spokes = Vec::new();
+                for p in &thermal {
+                    let b = p.bbox();
+                    let c = Point::new((b.min.x + b.max.x) / 2.0, (b.min.y + b.max.y) / 2.0);
+                    let hx = b.width() / 2.0 + z.thermal_gap + min_w;
+                    let hy = b.height() / 2.0 + z.thermal_gap + min_w;
+                    let s = spoke / 2.0;
+                    spokes.push(mp(gpoly(&[
+                        Point::new(c.x - hx, c.y - s),
+                        Point::new(c.x + hx, c.y - s),
+                        Point::new(c.x + hx, c.y + s),
+                        Point::new(c.x - hx, c.y + s),
+                    ])));
+                    spokes.push(mp(gpoly(&[
+                        Point::new(c.x - s, c.y - hy),
+                        Point::new(c.x + s, c.y - hy),
+                        Point::new(c.x + s, c.y + hy),
+                        Point::new(c.x - s, c.y + hy),
+                    ])));
+                }
+                let spokes = union_all(spokes).intersection(&allowed);
+                fill = fill.union(&spokes);
+            }
+
+            // Keep only pieces that touch copper of the zone's net.
+            let prims = to_prims(&fill);
+            let kept: Vec<Prim> = if z.net.is_some() {
+                prims
+                    .into_iter()
+                    .filter(|p| anchors.iter().any(|a| p.distance(a) <= 1e-6))
+                    .collect()
+            } else {
+                prims
+            };
+            let kept_mp = MultiPolygon::new(
+                kept.iter()
+                    .filter_map(|p| match p {
+                        Prim::Poly { outer, holes } => Some(Polygon::new(
+                            ring(outer),
+                            holes.iter().map(|h| ring(h)).collect(),
+                        )),
+                        _ => None,
+                    })
+                    .collect(),
+            );
+            done.push((l, z.net.clone(), kept_mp));
+            out.push(ZoneFill {
+                zone: z.id.clone(),
+                net: z.net.clone(),
+                layer: *layer,
+                polygons: kept
+                    .into_iter()
+                    .filter_map(|p| match p {
+                        Prim::Poly { outer, holes } => Some(FillPolygon {
+                            outer: outer.into_iter().map(round_pt).collect(),
+                            holes: holes
+                                .into_iter()
+                                .map(|h| h.into_iter().map(round_pt).collect())
+                                .collect(),
+                        }),
+                        _ => None,
+                    })
+                    .collect(),
+            });
+        }
+    }
+    out
+}
+
+fn round_pt(p: Point) -> Point {
+    Point::new(json::round6(p.x), json::round6(p.y))
+}
+
+fn bbox_of(m: &MultiPolygon<f64>) -> Rect {
+    let pts =
+        m.0.iter()
+            .flat_map(|p| p.exterior().0.iter().map(|c| Point::new(c.x, c.y)));
+    Rect::from_points(pts).unwrap_or(Rect {
+        min: Point::new(0.0, 0.0),
+        max: Point::new(0.0, 0.0),
+    })
+}

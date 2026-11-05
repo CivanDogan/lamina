@@ -1,0 +1,88 @@
+use lamina_footprint::{Options, from_package};
+use lamina_model::*;
+use lamina_route::*;
+
+fn board() -> ProjectData {
+    let mut d = ProjectData::new("t");
+    d.board.outline = Some(Contour::rect(0.0, 0.0, 30.0, 20.0));
+    for pkg in ["R_0603", "SOIC-8"] {
+        let fp = from_package(pkg, &Options::default(), None).unwrap();
+        d.footprints.insert(fp.id.clone(), fp);
+    }
+    for (r, f, x, y) in [
+        ("R1", "R_0603", 5.0, 10.0),
+        ("R2", "R_0603", 25.0, 10.0),
+        ("U1", "SOIC-8", 15.0, 10.0),
+    ] {
+        d.parts.parts.insert(r.into(), Part::new(f));
+        d.placement.placements.insert(r.into(), Placement::at(x, y));
+    }
+    // A crosses under/around U1; B and C are short.
+    let net = |pads: &[&str]| Net {
+        pads: pads.iter().map(|p| p.parse().unwrap()).collect(),
+        class: None,
+    };
+    d.nets.nets.insert("A".into(), net(&["R1.2", "R2.1"]));
+    d.nets.nets.insert("B".into(), net(&["U1.1", "R1.1"]));
+    d.nets.nets.insert("C".into(), net(&["U1.5", "R2.2"]));
+    d
+}
+
+#[test]
+fn routes_without_errors() {
+    let mut d = board();
+    let out = autoroute(&d, &RouteOptions::default()).unwrap();
+    assert!(out.failed.is_empty(), "{:?}", out.failed);
+    assert_eq!(out.routed.len(), 3);
+    d.routing.tracks.extend(out.tracks);
+    d.routing.vias.extend(out.vias);
+    let a = lamina_drc::analyze(&d);
+    assert!(a.ratsnest.is_empty(), "{:?}", a.ratsnest);
+    let errors: Vec<_> = a
+        .violations
+        .iter()
+        .filter(|v| v.severity == Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    // Tracks are octilinear.
+    for t in &d.routing.tracks {
+        for w in t
+            .points
+            .windows(2)
+            .skip(1)
+            .take(t.points.len().saturating_sub(3))
+        {
+            let dx = (w[1].x - w[0].x).abs();
+            let dy = (w[1].y - w[0].y).abs();
+            assert!(
+                dx < 1e-6 || dy < 1e-6 || (dx - dy).abs() < 1e-6,
+                "{} not octilinear: {:?}",
+                t.id,
+                w
+            );
+        }
+    }
+}
+
+#[test]
+fn single_layer_forces_detour_or_failure_report() {
+    let d = board();
+    let opt = RouteOptions {
+        layers: Some(vec![Layer::TOP]),
+        ..Default::default()
+    };
+    let out = autoroute(&d, &opt).unwrap();
+    assert!(out.vias.is_empty());
+    assert_eq!(out.routed.len() + out.failed.len(), 3);
+}
+
+#[test]
+fn skip_nets() {
+    let d = board();
+    let opt = RouteOptions {
+        skip: vec!["A".into()],
+        ..Default::default()
+    };
+    let out = autoroute(&d, &opt).unwrap();
+    assert!(out.tracks.iter().all(|t| t.net != "A"));
+}

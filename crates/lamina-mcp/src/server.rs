@@ -4,12 +4,9 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use lamina_core::Project;
 use lamina_core::model::{self, Severity};
-use lamina_core::{
-    AddPart, AddParts, Connect, Disconnect, FootprintFromPackage, FootprintFromPads, FootprintId,
-    ImportLcsc, ImportMany, Project, RemovePart, SearchPart, SetNets, SetOutline, SetRules,
-    SetStackup,
-};
+use lamina_core::ops::*;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
@@ -359,6 +356,172 @@ impl Lamina {
         Parameters(p): Parameters<ImportMany>,
     ) -> Result<CallToolResult, McpError> {
         self.with(|proj| proj.import_many(p))
+    }
+    /// Load design rules from a fab preset: `jlcpcb-2layer`, `jlcpcb-4layer`, `relaxed`.
+    #[tool(annotations(title = "Use fab preset"))]
+    async fn use_fab_preset(
+        &self,
+        Parameters(p): Parameters<UseFabPreset>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.use_fab_preset(p))
+    }
+
+    /// Place a part at x, y (mm) with optional rotation (degrees CCW) and side.
+    #[tool(annotations(title = "Place part"))]
+    async fn place(&self, Parameters(p): Parameters<Place>) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.place(p))
+    }
+
+    /// Place many parts: `{"placements": {"R1": {"x": 10, "y": 5, "rotation": 90}}}`.
+    #[tool(annotations(title = "Place parts"))]
+    async fn place_many(
+        &self,
+        Parameters(p): Parameters<PlaceMany>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.place_many(p))
+    }
+
+    /// Move placed parts by dx, dy.
+    #[tool(annotations(title = "Move parts"))]
+    async fn move_parts(
+        &self,
+        Parameters(p): Parameters<MoveParts>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.move_parts(p))
+    }
+
+    /// Rotate a part to an absolute angle (`rotation`) or by a relative one (`by`).
+    #[tool(annotations(title = "Rotate part"))]
+    async fn rotate_part(
+        &self,
+        Parameters(p): Parameters<RotatePart>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.rotate_part(p))
+    }
+
+    /// Move a part to the other side of the board.
+    #[tool(annotations(title = "Flip part"))]
+    async fn flip_part(
+        &self,
+        Parameters(p): Parameters<FlipPart>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.flip_part(p))
+    }
+
+    /// Align parts on a common X or Y.
+    #[tool(annotations(title = "Align parts"))]
+    async fn align(&self, Parameters(p): Parameters<Align>) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.align(p))
+    }
+
+    /// Space parts evenly along X or Y.
+    #[tool(annotations(title = "Distribute parts"))]
+    async fn distribute(
+        &self,
+        Parameters(p): Parameters<Distribute>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.distribute(p))
+    }
+
+    /// Remove placements.
+    #[tool(annotations(title = "Unplace parts"))]
+    async fn unplace(
+        &self,
+        Parameters(p): Parameters<Unplace>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.unplace(p))
+    }
+
+    /// Distance between two pads (`U1.3`), parts (`U1`) or points.
+    #[tool(annotations(title = "Measure", read_only_hint = true))]
+    async fn measure(
+        &self,
+        Parameters(p): Parameters<Measure>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.measure(p))
+    }
+
+    /// Add a trace on one copper layer. Points are `{x, y}` or pad
+    /// references like `U1.3`, which snap to the pad centre.
+    #[tool(annotations(title = "Route trace"))]
+    async fn route_trace(
+        &self,
+        Parameters(p): Parameters<RouteTrace>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.route_trace(p))
+    }
+
+    /// Add a through via at a point or on a pad.
+    #[tool(annotations(title = "Add via"))]
+    async fn add_via(&self, Parameters(p): Parameters<AddVia>) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.add_via(p))
+    }
+
+    /// Add a copper pour (zone). The outline defaults to the board outline.
+    #[tool(annotations(title = "Add zone"))]
+    async fn add_zone(
+        &self,
+        Parameters(p): Parameters<AddZone>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.add_zone(p))
+    }
+
+    /// Add a keep-out area on copper layers.
+    #[tool(annotations(title = "Add keep-out"))]
+    async fn add_keepout(
+        &self,
+        Parameters(p): Parameters<AddKeepout>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.add_keepout(p))
+    }
+
+    /// Add a board-level mounting hole (plated when pad_diameter is given).
+    #[tool(annotations(title = "Add hole"))]
+    async fn add_hole(
+        &self,
+        Parameters(p): Parameters<AddHole>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.add_hole(p))
+    }
+
+    /// Add text on silkscreen or copper.
+    #[tool(annotations(title = "Add text"))]
+    async fn add_text(
+        &self,
+        Parameters(p): Parameters<AddText>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.add_text(p))
+    }
+
+    /// Remove tracks and vias by net, ids, layer or region.
+    #[tool(annotations(title = "Rip up"))]
+    async fn ripup(&self, Parameters(p): Parameters<Ripup>) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.ripup(p))
+    }
+
+    /// Delete routing items, zones, keep-outs, texts or holes by id.
+    #[tool(annotations(title = "Delete items"))]
+    async fn delete_items(
+        &self,
+        Parameters(p): Parameters<DeleteItems>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.delete_items(p))
+    }
+
+    /// Route unrouted connections on a grid (45-degree tracks, vias between
+    /// layers). Skip nets you will pour, e.g. `{"skip": ["GND"]}`.
+    #[tool(annotations(title = "Autoroute"))]
+    async fn autoroute(
+        &self,
+        Parameters(p): Parameters<Autoroute>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.autoroute(p))
+    }
+
+    /// Unrouted connections as pad-to-pad lines.
+    #[tool(annotations(title = "Ratsnest", read_only_hint = true))]
+    async fn ratsnest(&self) -> Result<CallToolResult, McpError> {
+        self.with(|proj| Ok(proj.ratsnest()))
     }
 }
 

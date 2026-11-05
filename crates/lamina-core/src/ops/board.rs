@@ -198,3 +198,36 @@ impl Project {
         self.commit(d, Touched::file(FileKind::Board), p.strict, "rules updated")
     }
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct UseFabPreset {
+    /// `jlcpcb-2layer`, `jlcpcb-4layer` or `relaxed`.
+    pub name: String,
+    #[serde(default)]
+    pub strict: bool,
+}
+
+impl Project {
+    pub fn use_fab_preset(&mut self, p: UseFabPreset) -> Result<OpResult> {
+        let mut rules = lamina_drc::presets::get(&p.name).ok_or_else(|| {
+            let names: Vec<&str> = lamina_drc::presets::PRESETS
+                .iter()
+                .map(|x| x.name)
+                .collect();
+            Error::invalid(format!(
+                "unknown preset `{}`; use one of {}",
+                p.name,
+                names.join(", ")
+            ))
+        })?;
+        let mut d = self.data.clone();
+        rules.net_classes = d.board.rules.net_classes.clone();
+        d.board.rules = rules;
+        self.commit(
+            d,
+            Touched::file(FileKind::Board),
+            p.strict,
+            format!("rules from preset {}", p.name),
+        )
+    }
+}

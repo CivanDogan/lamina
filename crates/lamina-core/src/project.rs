@@ -62,6 +62,7 @@ pub struct Project {
     pub data: ProjectData,
     checkers: Vec<Checker>,
     source: std::sync::Arc<dyn lamina_parts::PartSource>,
+    cached: Option<Vec<Violation>>,
     _lock: Lock,
 }
 
@@ -99,6 +100,7 @@ impl Project {
             data,
             checkers: Vec::new(),
             source: std::sync::Arc::new(lamina_parts::HttpSource::default()),
+            cached: None,
             _lock: lock,
         })
     }
@@ -111,6 +113,7 @@ impl Project {
             data,
             checkers: Vec::new(),
             source: std::sync::Arc::new(lamina_parts::HttpSource::default()),
+            cached: None,
             _lock: lock,
         })
     }
@@ -130,6 +133,7 @@ impl Project {
 
     /// Add a checker that runs after every change (DRC registers here).
     pub fn add_checker(&mut self, c: Checker) {
+        self.cached = None;
         self.checkers.push(c);
     }
 
@@ -140,15 +144,27 @@ impl Project {
 
     fn check_data(&self, d: &ProjectData) -> Vec<Violation> {
         let mut v = crate::validate::validate(d);
+        v.extend(lamina_drc::check(d));
         for c in &self.checkers {
             v.extend(c(d));
         }
         v
     }
 
+    /// Violations of the current state, cached between changes.
+    fn current_violations(&mut self) -> Vec<Violation> {
+        if let Some(v) = &self.cached {
+            return v.clone();
+        }
+        let v = self.check_data(&self.data);
+        self.cached = Some(v.clone());
+        v
+    }
+
     /// Re-read everything from disk (for example after the user edited files).
     pub fn reload(&mut self) -> Result<()> {
         self.data = ProjectData::load(&self.root)?;
+        self.cached = None;
         Ok(())
     }
 
@@ -161,7 +177,7 @@ impl Project {
         strict: bool,
         summary: impl Into<String>,
     ) -> Result<OpResult> {
-        let before = self.check_data(&self.data);
+        let before = self.current_violations();
         let after = self.check_data(&new);
         let before_keys: BTreeSet<String> = before.iter().map(|v| v.key()).collect();
         let after_keys: BTreeSet<String> = after.iter().map(|v| v.key()).collect();
@@ -211,13 +227,15 @@ impl Project {
             .iter()
             .filter(|v| v.severity == Severity::Error)
             .count();
+        let warnings = after.len() - errors;
+        self.cached = Some(after);
         Ok(OpResult {
             summary: summary.into(),
             changed,
             new_violations,
             fixed,
             errors,
-            warnings: after.len() - errors,
+            warnings,
             notes: Vec::new(),
         })
     }
