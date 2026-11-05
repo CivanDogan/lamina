@@ -45,6 +45,14 @@ enum Cmd {
         #[arg(long)]
         online: bool,
     },
+    /// Import an EasyEDA PCB JSON into a project (created when missing).
+    ImportEasyeda {
+        file: PathBuf,
+        dir: PathBuf,
+        /// Skip fetching 3D models from EasyEDA.
+        #[arg(long)]
+        no_models: bool,
+    },
     /// Write a project as a .kicad_pcb file.
     ExportKicad {
         dir: PathBuf,
@@ -95,6 +103,26 @@ fn main() -> anyhow::Result<()> {
                 path: file.to_string_lossy().to_string(),
                 models: true,
                 online,
+                replace: false,
+                strict: false,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&r)?);
+            Ok(())
+        }
+        Cmd::ImportEasyeda {
+            file,
+            dir,
+            no_models,
+        } => {
+            let path = dir.to_string_lossy().to_string();
+            let name = file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_string);
+            let mut p = server::open_project(&path, true, name, false)?;
+            let r = p.import_easyeda_board(lamina_core::ImportEasyedaBoard {
+                path: file.to_string_lossy().to_string(),
+                models: !no_models,
                 replace: false,
                 strict: false,
             })?;

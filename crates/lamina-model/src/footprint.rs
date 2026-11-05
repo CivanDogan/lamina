@@ -64,6 +64,19 @@ impl Footprint {
         self.pads_bbox()
     }
 
+    /// The part body for placeholders: fab drawing, else pads, else courtyard.
+    pub fn body_bbox(&self) -> Option<Rect> {
+        let fab: Vec<Point> = self
+            .graphics
+            .iter()
+            .filter(|g| g.layer == FpLayer::Fab)
+            .flat_map(|g| g.shape.points())
+            .collect();
+        Rect::from_points(fab)
+            .or_else(|| self.pads_bbox())
+            .or_else(|| self.courtyard_bbox())
+    }
+
     pub fn pads_bbox(&self) -> Option<Rect> {
         let mut out: Option<Rect> = None;
         for p in &self.pads {

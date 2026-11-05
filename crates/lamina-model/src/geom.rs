@@ -485,3 +485,206 @@ mod tests {
         assert!((p.x).abs() < 1e-12 && (p.y - 1.0).abs() < 1e-12);
     }
 }
+
+// ---------------------------------------------------------------- outlines from edges
+
+/// A loose edge of an outline being assembled from drawing primitives.
+#[derive(Clone, Debug)]
+pub enum Edge {
+    Line(Point, Point),
+    Arc {
+        a: Point,
+        b: Point,
+        center: Point,
+        ccw: bool,
+    },
+    /// A complete closed loop that needs no chaining.
+    Loop(Contour),
+}
+
+/// Edges of a drawing shape, for [`chain_edges`].
+pub fn edges_of(shape: &Shape) -> Vec<Edge> {
+    match shape {
+        Shape::Line { a, b } => vec![Edge::Line(*a, *b)],
+        Shape::Arc {
+            center,
+            start,
+            angle,
+        } => {
+            let end = start.sub(*center).rotated(*angle).add(*center);
+            vec![Edge::Arc {
+                a: *start,
+                b: Point::new(crate::json::round6(end.x), crate::json::round6(end.y)),
+                center: *center,
+                ccw: *angle > 0.0,
+            }]
+        }
+        Shape::Rect { min, max } => {
+            let c = [
+                *min,
+                Point::new(max.x, min.y),
+                *max,
+                Point::new(min.x, max.y),
+            ];
+            (0..4).map(|i| Edge::Line(c[i], c[(i + 1) % 4])).collect()
+        }
+        Shape::Circle { center, radius } => vec![Edge::Loop(Contour::circle(*center, *radius))],
+        Shape::Polygon { points } => contour_from_points(points.clone())
+            .map(|c| vec![Edge::Loop(c)])
+            .unwrap_or_default(),
+    }
+}
+
+/// A counter-clockwise contour from a point list (no arcs); `None` when degenerate.
+pub fn contour_from_points(mut pts: Vec<Point>) -> Option<Contour> {
+    pts.dedup_by(|a, b| a.dist(*b) < 1e-6);
+    if pts.len() > 2 && pts[0].dist(*pts.last().unwrap()) < 1e-6 {
+        pts.pop();
+    }
+    if pts.len() < 3 {
+        return None;
+    }
+    let mut c = Contour {
+        vertices: pts.iter().map(|p| Vertex::line(p.x, p.y)).collect(),
+    };
+    if c.signed_area() < 0.0 {
+        c.vertices.reverse();
+    }
+    Some(c)
+}
+
+/// Start, end and optional arc (centre, counter-clockwise) of a loose edge.
+type Seg = (Point, Point, Option<(Point, bool)>);
+
+/// Join loose edges into closed loops, tolerating the small overlaps and
+/// stubs hand-drawn outlines often have. Ends closer than `tol` (mm) are
+/// taken as joined. Returns the loops and how many edges could not be used.
+pub fn chain_edges(edges: Vec<Edge>, tol: f64) -> (Vec<Contour>, usize) {
+    let tol = tol.max(1e-6);
+    let mut loops = Vec::new();
+    let mut pool: Vec<Seg> = Vec::new();
+    let mut open = 0;
+    for e in edges {
+        match e {
+            Edge::Loop(c) => loops.push(c),
+            Edge::Line(a, b) => {
+                if a.dist(b) > tol {
+                    pool.push((a, b, None));
+                } else {
+                    open += 1;
+                }
+            }
+            Edge::Arc { a, b, center, ccw } => {
+                if a.dist(b) > tol {
+                    pool.push((a, b, Some((center, ccw))));
+                } else {
+                    open += 1;
+                }
+            }
+        }
+    }
+    let seg_len = |e: &Seg| e.0.dist(e.1);
+    let degree = |pool: &[Seg], p: Point| -> usize {
+        pool.iter()
+            .map(|e| usize::from(e.0.dist(p) < tol) + usize::from(e.1.dist(p) < tol))
+            .sum()
+    };
+    while !pool.is_empty() {
+        // Start from the longest edge, so stubs come last.
+        let start_i = (0..pool.len())
+            .max_by(|&a, &b| seg_len(&pool[a]).total_cmp(&seg_len(&pool[b])))
+            .unwrap();
+        let first = pool.remove(start_i);
+        let start = first.0;
+        let mut chain = vec![first];
+        let mut used: Vec<usize> = Vec::new();
+        let mut end = first.1;
+        let mut closed = false;
+        loop {
+            if end.dist(start) < tol {
+                closed = true;
+                break;
+            }
+            let mut cands: Vec<(usize, bool)> = pool
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !used.contains(i))
+                .filter_map(|(i, e)| {
+                    if e.0.dist(end) < tol {
+                        Some((i, false))
+                    } else if e.1.dist(end) < tol {
+                        Some((i, true))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if cands.is_empty() {
+                break;
+            }
+            // Prefer an edge that closes the loop, then one whose far end
+            // continues somewhere, then the longer one.
+            let score = |(i, rev): (usize, bool)| {
+                let far = if rev { pool[i].0 } else { pool[i].1 };
+                let closes = far.dist(start) < tol;
+                let continues = degree(&pool, far) >= 2;
+                (
+                    u8::from(closes) * 2 + u8::from(continues),
+                    seg_len(&pool[i]),
+                )
+            };
+            cands.sort_by(|&a, &b| {
+                let (sa, sb) = (score(a), score(b));
+                sb.0.cmp(&sa.0).then(sb.1.total_cmp(&sa.1))
+            });
+            let (i, rev) = cands[0];
+            let e = pool[i];
+            let e = if rev {
+                (e.1, e.0, e.2.map(|(c, ccw)| (c, !ccw)))
+            } else {
+                e
+            };
+            end = e.1;
+            used.push(i);
+            chain.push(e);
+        }
+        if !closed {
+            // The start edge was a stub; the rest stays available.
+            open += 1;
+            continue;
+        }
+        used.sort_unstable_by(|a, b| b.cmp(a));
+        for i in used {
+            pool.remove(i);
+        }
+        // Each edge starts a vertex; where an edge ends short of the next
+        // one, its true end becomes a vertex too, so arcs keep their radius
+        // and a short line bridges the gap.
+        let build = |chain: &[Seg]| {
+            let mut vertices = Vec::new();
+            for (k, (a, b, arc)) in chain.iter().enumerate() {
+                vertices.push(Vertex {
+                    x: a.x,
+                    y: a.y,
+                    arc: arc.map(|(center, ccw)| ArcTo { center, ccw }),
+                });
+                let next = chain[(k + 1) % chain.len()].0;
+                if b.dist(next) > 1e-4 {
+                    vertices.push(Vertex::line(b.x, b.y));
+                }
+            }
+            Contour { vertices }
+        };
+        let mut c = build(&chain);
+        if c.signed_area() < 0.0 {
+            let rev: Vec<Seg> = chain
+                .iter()
+                .rev()
+                .map(|(a, b, arc)| (*b, *a, arc.map(|(c, ccw)| (c, !ccw))))
+                .collect();
+            c = build(&rev);
+        }
+        loops.push(c);
+    }
+    (loops, open)
+}

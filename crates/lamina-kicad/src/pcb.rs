@@ -415,7 +415,7 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
             filled,
         });
     }
-    let (loops, open) = chain_edges(edges);
+    let (loops, open) = chain_edges(edges, 0.01);
     if open > 0 {
         notes.push(format!(
             "{open} board edge segment(s) do not close a loop and were ignored"
@@ -493,141 +493,6 @@ fn register_footprint(d: &mut ProjectData, mut fp: Footprint) -> String {
             }
         }
     }
-}
-
-#[derive(Clone, Debug)]
-enum Edge {
-    Line(Point, Point),
-    Arc {
-        a: Point,
-        b: Point,
-        center: Point,
-        ccw: bool,
-    },
-    /// A complete closed loop that needs no chaining.
-    Loop(Contour),
-}
-
-fn edges_of(shape: &Shape) -> Vec<Edge> {
-    match shape {
-        Shape::Line { a, b } => vec![Edge::Line(*a, *b)],
-        Shape::Arc {
-            center,
-            start,
-            angle,
-        } => {
-            let end = start.sub(*center).rotated(*angle).add(*center);
-            vec![Edge::Arc {
-                a: *start,
-                b: Point::new(r6(end.x), r6(end.y)),
-                center: *center,
-                ccw: *angle > 0.0,
-            }]
-        }
-        Shape::Rect { min, max } => {
-            let c = [
-                *min,
-                Point::new(max.x, min.y),
-                *max,
-                Point::new(min.x, max.y),
-            ];
-            (0..4).map(|i| Edge::Line(c[i], c[(i + 1) % 4])).collect()
-        }
-        Shape::Circle { center, radius } => vec![Edge::Loop(Contour::circle(*center, *radius))],
-        Shape::Polygon { points } => contour_from_points(points.clone())
-            .map(|c| vec![Edge::Loop(c)])
-            .unwrap_or_default(),
-    }
-}
-
-fn contour_from_points(mut pts: Vec<Point>) -> Option<Contour> {
-    pts.dedup_by(|a, b| a.dist(*b) < 1e-6);
-    if pts.len() > 2 && pts[0].dist(*pts.last().unwrap()) < 1e-6 {
-        pts.pop();
-    }
-    if pts.len() < 3 {
-        return None;
-    }
-    let mut c = Contour {
-        vertices: pts.iter().map(|p| Vertex::line(p.x, p.y)).collect(),
-    };
-    if c.signed_area() < 0.0 {
-        c.vertices.reverse();
-    }
-    Some(c)
-}
-
-/// Start, end and optional arc (centre, counter-clockwise) of a loose edge.
-type Seg = (Point, Point, Option<(Point, bool)>);
-
-/// Join loose edges into closed loops. Returns the loops and how many
-/// edges stayed unconnected.
-fn chain_edges(edges: Vec<Edge>) -> (Vec<Contour>, usize) {
-    let tol = 0.01;
-    let mut loops = Vec::new();
-    let mut pool: Vec<Seg> = Vec::new();
-    for e in edges {
-        match e {
-            Edge::Loop(c) => loops.push(c),
-            Edge::Line(a, b) => pool.push((a, b, None)),
-            Edge::Arc { a, b, center, ccw } => pool.push((a, b, Some((center, ccw)))),
-        }
-    }
-    let mut open = 0;
-    while let Some(first) = pool.pop() {
-        let start = first.0;
-        let mut chain = vec![first];
-        let mut end = chain[0].1;
-        loop {
-            if end.dist(start) < tol && chain.len() > 1 {
-                break;
-            }
-            let next = pool
-                .iter()
-                .position(|e| e.0.dist(end) < tol || e.1.dist(end) < tol);
-            match next {
-                Some(i) => {
-                    let (a, b, arc) = pool.remove(i);
-                    let e = if a.dist(end) < tol {
-                        (a, b, arc)
-                    } else {
-                        (b, a, arc.map(|(c, ccw)| (c, !ccw)))
-                    };
-                    end = e.1;
-                    chain.push(e);
-                }
-                None => {
-                    open += chain.len();
-                    chain.clear();
-                    break;
-                }
-            }
-        }
-        if chain.is_empty() {
-            continue;
-        }
-        let build = |chain: &[Seg]| Contour {
-            vertices: chain
-                .iter()
-                .map(|(a, _, arc)| Vertex {
-                    x: a.x,
-                    y: a.y,
-                    arc: arc.map(|(center, ccw)| ArcTo { center, ccw }),
-                })
-                .collect(),
-        };
-        let mut c = build(&chain);
-        if c.signed_area() < 0.0 {
-            let rev: Vec<_> = chain
-                .iter()
-                .rev()
-                .map(|(a, b, arc)| (*b, *a, arc.map(|(c, ccw)| (c, !ccw))))
-                .collect();
-            c = build(&rev);
-        }
-        loops.push(c);
-    }
-    (loops, open)
 }
 
 // ---------------------------------------------------------------- export
@@ -1657,7 +1522,7 @@ mod tests {
             Edge::Line(Point::new(0.0, 10.0), Point::new(10.0, 10.0)),
             Edge::Line(Point::new(50.0, 50.0), Point::new(60.0, 50.0)),
         ];
-        let (loops, open) = chain_edges(edges);
+        let (loops, open) = chain_edges(edges, 0.01);
         assert_eq!(loops.len(), 1);
         assert_eq!(open, 1);
         assert!(loops[0].signed_area() > 0.0);

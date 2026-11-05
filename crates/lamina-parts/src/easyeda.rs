@@ -7,7 +7,7 @@ use lamina_model::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const U: f64 = 0.254;
+pub(crate) const U: f64 = 0.254;
 
 fn r6(v: f64) -> f64 {
     lamina_model::json::round6(v)
@@ -50,36 +50,36 @@ pub struct Imported {
     pub notes: Vec<String>,
 }
 
-struct Ctx {
-    ox: f64,
-    oy: f64,
+pub(crate) struct Ctx {
+    pub(crate) ox: f64,
+    pub(crate) oy: f64,
 }
 
 impl Ctx {
-    fn pt(&self, x: f64, y: f64) -> Point {
+    pub(crate) fn pt(&self, x: f64, y: f64) -> Point {
         Point::new(r6((x - self.ox) * U), r6(-(y - self.oy) * U))
     }
 }
 
-fn f(fields: &[&str], i: usize) -> f64 {
+pub(crate) fn f(fields: &[&str], i: usize) -> f64 {
     fields
         .get(i)
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0.0)
 }
 
-fn s<'a>(fields: &[&'a str], i: usize) -> &'a str {
+pub(crate) fn s<'a>(fields: &[&'a str], i: usize) -> &'a str {
     fields.get(i).copied().unwrap_or("")
 }
 
-fn nums(text: &str) -> Vec<f64> {
+pub(crate) fn nums(text: &str) -> Vec<f64> {
     text.split([' ', ','])
         .filter(|t| !t.is_empty())
         .filter_map(|t| t.parse().ok())
         .collect()
 }
 
-fn points(ctx: &Ctx, text: &str) -> Vec<Point> {
+pub(crate) fn points(ctx: &Ctx, text: &str) -> Vec<Point> {
     nums(text)
         .as_chunks::<2>()
         .0
@@ -90,7 +90,7 @@ fn points(ctx: &Ctx, text: &str) -> Vec<Point> {
 
 /// Parse an SVG path of M, L, Z and A commands into points (arcs flattened
 /// to their end point, which is enough for outlines).
-fn path_points(ctx: &Ctx, path: &str) -> Vec<Point> {
+pub(crate) fn path_points(ctx: &Ctx, path: &str) -> Vec<Point> {
     let mut out = Vec::new();
     let mut tok = String::new();
     let mut tokens: Vec<String> = Vec::new();
@@ -147,7 +147,7 @@ fn path_points(ctx: &Ctx, path: &str) -> Vec<Point> {
 }
 
 /// SVG arc `M x0 y0 A r r 0 large sweep x1 y1` to a Lamina arc.
-fn svg_arc(ctx: &Ctx, path: &str) -> Option<Shape> {
+pub(crate) fn svg_arc(ctx: &Ctx, path: &str) -> Option<Shape> {
     let cleaned = path.replace(['M', 'A', 'm', 'a'], " ");
     let v = nums(&cleaned);
     if v.len() < 9 {
@@ -180,7 +180,7 @@ fn svg_arc(ctx: &Ctx, path: &str) -> Option<Shape> {
     })
 }
 
-fn graphic_layer(layer: &str) -> Option<FpLayer> {
+pub(crate) fn graphic_layer(layer: &str) -> Option<FpLayer> {
     match layer {
         "3" => Some(FpLayer::Silk),
         "12" | "13" | "15" | "99" | "100" | "101" => Some(FpLayer::Fab),
@@ -468,7 +468,22 @@ pub fn convert(resp: &Value, lcsc: &str, fetched: &str) -> Result<Imported, Stri
     })
 }
 
+/// A pad with the side it sits on (`None` for through pads) and its net.
+pub(crate) struct RawPad {
+    pub pad: Pad,
+    pub side: Option<Side>,
+    pub net: String,
+}
+
 fn pad(ctx: &Ctx, fl: &[&str]) -> Result<Option<Pad>, String> {
+    let raw = pad_any(ctx, fl)?;
+    Ok(match raw.side {
+        Some(Side::Bottom) => None,
+        _ => Some(raw.pad),
+    })
+}
+
+pub(crate) fn pad_any(ctx: &Ctx, fl: &[&str]) -> Result<RawPad, String> {
     let shape = s(fl, 1);
     let at = ctx.pt(f(fl, 2), f(fl, 3));
     let w = r6(f(fl, 4) * U);
@@ -479,7 +494,8 @@ fn pad(ctx: &Ctx, fl: &[&str]) -> Result<Option<Pad>, String> {
     let rot = f(fl, 11);
     let hole_len = f(fl, 13);
     let plated = s(fl, 15) != "N";
-    let mut rotation = r6((-rot).rem_euclid(360.0));
+    // EasyEDA rotates counter-clockwise on screen, like Lamina does.
+    let mut rotation = r6(rot.rem_euclid(360.0));
     if rotation >= 359.999999 {
         rotation = 0.0;
     }
@@ -516,9 +532,13 @@ fn pad(ctx: &Ctx, fl: &[&str]) -> Result<Option<Pad>, String> {
         other => return Err(format!("unknown pad shape {other}")),
     };
     shape.check()?;
+    let side = match layer {
+        "1" => Some(Side::Top),
+        "2" => Some(Side::Bottom),
+        _ => None,
+    };
     let kind = match layer {
-        "1" => PadKind::Smd,
-        "2" => return Ok(None),
+        "1" | "2" => PadKind::Smd,
         "11" => {
             let d = r6(hole_r * 2.0 * U);
             if d <= 0.0 {
@@ -546,20 +566,24 @@ fn pad(ctx: &Ctx, fl: &[&str]) -> Result<Option<Pad>, String> {
         other => return Err(format!("pad {number} on unsupported layer {other}")),
     };
     let smd = matches!(kind, PadKind::Smd);
-    Ok(Some(Pad {
-        number,
-        at,
-        rotation,
-        shape,
-        kind,
-        mask_margin: None,
-        paste_margin: None,
-        paste: smd,
-        mask: true,
-    }))
+    Ok(RawPad {
+        pad: Pad {
+            number,
+            at,
+            rotation,
+            shape,
+            kind,
+            mask_margin: None,
+            paste_margin: None,
+            paste: smd,
+            mask: true,
+        },
+        side,
+        net: s(fl, 7).trim().to_string(),
+    })
 }
 
-fn model_info(ctx: &Ctx, json_text: &str) -> Option<ModelInfo> {
+pub(crate) fn model_info(ctx: &Ctx, json_text: &str) -> Option<ModelInfo> {
     let v: Value = serde_json::from_str(json_text).ok()?;
     let a = v.get("attrs")?;
     if a.get("c_etype").and_then(|x| x.as_str()) != Some("outline3D") {

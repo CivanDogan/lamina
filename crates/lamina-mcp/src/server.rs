@@ -211,6 +211,19 @@ impl Lamina {
         self.with(|proj| proj.import_kicad_board(p))
     }
 
+    /// Import an EasyEDA (standard editor) PCB JSON, as saved with
+    /// File > Export > EasyEDA: outline, parts with footprints and LCSC
+    /// numbers, nets, placement, tracks, vias, copper areas, holes and
+    /// texts. 3D models are fetched from EasyEDA. The project must be empty
+    /// unless `replace` is true.
+    #[tool(annotations(title = "Import EasyEDA board"))]
+    async fn import_easyeda_board(
+        &self,
+        Parameters(p): Parameters<ImportEasyedaBoard>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.import_easyeda_board(p))
+    }
+
     /// Write the board as a `.kicad_pcb` file that KiCad 8 or newer opens
     /// (default `output/<name>.kicad_pcb`). Zones are refilled by KiCad.
     #[tool(annotations(title = "Export KiCad board"))]

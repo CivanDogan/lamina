@@ -132,49 +132,11 @@ impl Project {
                 "footprint `{fp_id}` already in the project, kept as is"
             ));
         } else {
-            // 3D model.
             if let Some(info) = &im.model {
-                let rel_obj = format!("lcsc/{}.obj", info.uuid);
-                let obj_path = root.join(MODEL_DIR).join(&rel_obj);
-                let obj = match (!p.refresh).then(|| read_cached(&obj_path)).flatten() {
-                    Some(t) => Some(t),
-                    None => match self.source().model_obj(&info.uuid) {
-                        Ok(t) => {
-                            write_atomic(&obj_path, t.as_bytes())?;
-                            Some(t)
-                        }
-                        Err(e) => {
-                            notes.push(format!("3D model not downloaded: {e}"));
-                            None
-                        }
-                    },
-                };
-                if let Some(obj) = obj {
-                    im.footprint.model = Some(lamina_parts::model_ref(info, &obj, rel_obj));
-                    im.footprint.height = lamina_parts::model_height(info, &obj);
-                    notes.push(format!("3D model `{}`", info.title));
-                }
-                if p.step {
-                    let rel_step = format!("lcsc/{}.step", info.uuid);
-                    let step_path = root.join(MODEL_DIR).join(&rel_step);
-                    if p.refresh || !step_path.exists() {
-                        match self.source().model_step(&info.uuid) {
-                            Ok(b) => write_atomic(&step_path, &b)?,
-                            Err(e) => notes.push(format!("STEP not downloaded: {e}")),
-                        }
-                    }
-                    // The STEP has the same geometry in the same frame with
-                    // smooth surfaces; use it when it loads.
-                    if step_path.exists() {
-                        match lamina_step::load(&step_path) {
-                            Ok(_) => {
-                                if let Some(m) = im.footprint.model.as_mut() {
-                                    m.file = rel_step;
-                                }
-                            }
-                            Err(e) => notes.push(format!("STEP did not load, using OBJ: {e}")),
-                        }
-                    }
+                if let Some((m, h)) = self.fetch_easyeda_model(info, p.refresh, p.step, &mut notes)
+                {
+                    im.footprint.model = Some(m);
+                    im.footprint.height = h;
                 }
             } else {
                 notes.push("EasyEDA has no 3D model for this footprint".into());
@@ -276,4 +238,148 @@ pub fn natural(a: &str, b: &str) -> std::cmp::Ordering {
     let (pa, na) = split(a);
     let (pb, nb) = split(b);
     pa.cmp(&pb).then(na.cmp(&nb)).then(a.cmp(b))
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct ImportEasyedaBoard {
+    /// Path of the EasyEDA PCB JSON (File > Export > EasyEDA in the standard editor).
+    pub path: String,
+    /// Fetch the parts' 3D models from EasyEDA (default true).
+    #[serde(default = "yes")]
+    pub models: bool,
+    /// Replace a project that already has a board.
+    #[serde(default)]
+    pub replace: bool,
+    #[serde(default)]
+    pub strict: bool,
+}
+
+impl Project {
+    /// Get an EasyEDA 3D model into `cache/models/lcsc/`, STEP when it loads.
+    pub(crate) fn fetch_easyeda_model(
+        &self,
+        info: &lamina_parts::ModelInfo,
+        refresh: bool,
+        step: bool,
+        notes: &mut Vec<String>,
+    ) -> Option<(ModelRef, Option<f64>)> {
+        let root = self.root().to_path_buf();
+        let rel_obj = format!("lcsc/{}.obj", info.uuid);
+        let obj_path = root.join(MODEL_DIR).join(&rel_obj);
+        let obj = match (!refresh).then(|| read_cached(&obj_path)).flatten() {
+            Some(t) => t,
+            None => match self.source().model_obj(&info.uuid) {
+                Ok(t) => {
+                    if let Err(e) = write_atomic(&obj_path, t.as_bytes()) {
+                        notes.push(format!("3D model not saved: {e}"));
+                        return None;
+                    }
+                    t
+                }
+                Err(e) => {
+                    notes.push(format!("3D model not downloaded: {e}"));
+                    return None;
+                }
+            },
+        };
+        let mut model = lamina_parts::model_ref(info, &obj, rel_obj);
+        let height = lamina_parts::model_height(info, &obj);
+        notes.push(format!("3D model `{}`", info.title));
+        if step {
+            let rel_step = format!("lcsc/{}.step", info.uuid);
+            let step_path = root.join(MODEL_DIR).join(&rel_step);
+            if refresh || !step_path.exists() {
+                match self.source().model_step(&info.uuid) {
+                    Ok(b) => {
+                        if let Err(e) = write_atomic(&step_path, &b) {
+                            notes.push(format!("STEP not saved: {e}"));
+                        }
+                    }
+                    Err(e) => notes.push(format!("STEP not downloaded: {e}")),
+                }
+            }
+            // The STEP has the same geometry in the same frame with smooth
+            // surfaces; use it when it loads.
+            if step_path.exists() {
+                match lamina_step::load(&step_path) {
+                    Ok(_) => model.file = rel_step,
+                    Err(e) => notes.push(format!("STEP did not load, using OBJ: {e}")),
+                }
+            }
+        }
+        Some((model, height))
+    }
+
+    pub fn import_easyeda_board(&mut self, p: ImportEasyedaBoard) -> Result<OpResult> {
+        let path = Path::new(&p.path);
+        let text = std::fs::read_to_string(path).map_err(|e| Error::io(path, e))?;
+        let doc: serde_json::Value = serde_json::from_str(&text).map_err(|e| Error::Json {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("board")
+            .to_string();
+        let cur = &self.data;
+        let has_board = !cur.parts.parts.is_empty()
+            || !cur.routing.tracks.is_empty()
+            || cur.board.outline.is_some();
+        if has_board && !p.replace {
+            return Err(Error::Refused(
+                "the project already has a board; pass replace: true to overwrite it".into(),
+            ));
+        }
+        let imported = lamina_parts::board::import_board(&doc, &name).map_err(Error::Invalid)?;
+        let mut notes = imported.notes;
+        let mut d = imported.data;
+        d.notes = self.data.notes.clone();
+        if p.models {
+            let mut found = 0;
+            for (fp_id, info) in &imported.models {
+                let mut mnotes = Vec::new();
+                if let Some((m, h)) = self.fetch_easyeda_model(info, false, true, &mut mnotes) {
+                    if let Some(fp) = d.footprints.get_mut(fp_id) {
+                        fp.model = Some(m);
+                        fp.height = h;
+                        found += 1;
+                    }
+                } else {
+                    notes.extend(mnotes);
+                }
+            }
+            notes.push(format!("3D models: {found} of {}", imported.models.len()));
+        }
+        let mut touched = Touched::default();
+        for k in [
+            FileKind::Board,
+            FileKind::Parts,
+            FileKind::Nets,
+            FileKind::Placement,
+            FileKind::Routing,
+        ] {
+            touched.files.insert(k);
+        }
+        for id in d.footprints.keys() {
+            touched.footprints.insert(id.clone());
+        }
+        for id in self.data.footprints.keys() {
+            if !d.footprints.contains_key(id) {
+                touched.removed_footprints.insert(id.clone());
+            }
+        }
+        let summary = format!(
+            "imported {}: {} parts, {} nets, {} tracks, {} vias, {} zones",
+            path.display(),
+            d.parts.parts.len(),
+            d.nets.nets.len(),
+            d.routing.tracks.len(),
+            d.routing.vias.len(),
+            d.routing.zones.len()
+        );
+        let mut res = self.commit(d, touched, p.strict, summary)?;
+        res.notes = notes;
+        Ok(res)
+    }
 }

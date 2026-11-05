@@ -108,6 +108,15 @@ Lamina reads and writes KiCad's formats without running KiCad:
 - `export_kicad` / `lamina export-kicad <dir>` write a `.kicad_pcb` that KiCad
   8 or newer opens; KiCad refills the zones.
 
+## EasyEDA boards
+
+`import_easyeda_board` / `lamina import-easyeda <file.json> <dir>` read a board
+saved from the standard EasyEDA editor with File → Export → EasyEDA: outline,
+parts with their LCSC numbers, nets, placement, tracks, vias, copper areas,
+holes and texts. 3D models are fetched from EasyEDA like LCSC imports. Solid
+copper regions (teardrops, hand-drawn copper) are kept as drawings. Rules are
+relaxed to what the board contains; apply a fab preset afterwards.
+
 ## Tools
 
 `lamina-step` has two developer examples: `corpus <dir>` loads every STEP file in

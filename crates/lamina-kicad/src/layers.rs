@@ -103,7 +103,11 @@ pub fn layer_table(copper: u8) -> Vec<(u32, &'static str, &'static str, Option<&
         "In18.Cu", "In19.Cu", "In20.Cu", "In21.Cu", "In22.Cu", "In23.Cu", "In24.Cu", "In25.Cu",
         "In26.Cu", "In27.Cu", "In28.Cu", "In29.Cu", "In30.Cu",
     ];
-    for (i, name) in INNER.iter().enumerate().take(copper.saturating_sub(2) as usize) {
+    for (i, name) in INNER
+        .iter()
+        .enumerate()
+        .take(copper.saturating_sub(2) as usize)
+    {
         v.push((i as u32 + 1, name, "signal", None));
     }
     if copper >= 2 {

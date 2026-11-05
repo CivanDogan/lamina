@@ -1,5 +1,6 @@
 //! Part search and import from LCSC / JLCPCB / EasyEDA.
 
+pub mod board;
 pub mod easyeda;
 pub mod source;
 

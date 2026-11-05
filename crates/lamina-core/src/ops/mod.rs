@@ -14,7 +14,7 @@ pub use kicad::{
     ExportKicad, ImportKicadBoard, ImportKicadFootprint, KicadExported, KicadSearch,
     SearchKicadFootprints,
 };
-pub use lcsc::{ImportLcsc, ImportMany, SearchPart, natural, today};
+pub use lcsc::{ImportEasyedaBoard, ImportLcsc, ImportMany, SearchPart, natural, today};
 pub use nets::{Connect, Disconnect, SetNets};
 pub use output::{AddNote, Export, Exported, ListNotes, ResolveNotes};
 pub use parts::{

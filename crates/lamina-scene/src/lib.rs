@@ -692,7 +692,7 @@ pub fn build_3d(d: &ProjectData, root: &Path) -> Scene3D {
             }
             None => (None, place),
         };
-        let placeholder = fp.courtyard_bbox().map(|r| {
+        let placeholder = fp.body_bbox().map(|r| {
             let h = fp.height.unwrap_or(1.0) as f32;
             let shrink = 0.25_f32;
             (
