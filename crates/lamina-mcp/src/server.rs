@@ -547,6 +547,44 @@ impl Lamina {
             Err(e) => Ok(error_result(e)),
         }
     }
+    /// Write Gerber X2, Excellon (PTH and NPTH), JLCPCB BOM and CPL files and
+    /// a gerber zip into the project's output folder. Refuses while DRC has
+    /// errors unless `force` is true.
+    #[tool(annotations(title = "Export for fabrication"))]
+    async fn export(&self, Parameters(p): Parameters<Export>) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.export(p))
+    }
+
+    /// Notes the user left in the viewer (open ones by default). Read these
+    /// before and after each round of changes.
+    #[tool(annotations(title = "Notes", read_only_hint = true))]
+    async fn notes(
+        &self,
+        Parameters(p): Parameters<ListNotes>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| Ok(proj.list_notes(p)))
+    }
+
+    /// Leave a note for the user (shown in the viewer).
+    #[tool(annotations(title = "Add note"))]
+    async fn add_note(
+        &self,
+        Parameters(p): Parameters<AddNote>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| proj.add_note(p))
+    }
+
+    /// Mark notes as handled.
+    #[tool(annotations(title = "Resolve notes"))]
+    async fn resolve_notes(
+        &self,
+        Parameters(p): Parameters<ResolveNotes>,
+    ) -> Result<CallToolResult, McpError> {
+        self.with(|proj| {
+            proj.resolve_notes(p)
+                .map(|n| serde_json::json!({"resolved": n}))
+        })
+    }
 }
 
 #[tool_handler(router = self.tool_router)]

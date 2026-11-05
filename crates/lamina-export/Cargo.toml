@@ -4,8 +4,18 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+description = "Gerber, Excellon, BOM and pick-and-place export for Lamina"
 
 [dependencies]
+lamina-model.workspace = true
+lamina-geom.workspace = true
+lamina-scene.workspace = true
+geo.workspace = true
+zip = { version = "9.4.0", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+lamina-drc.workspace = true
+lamina-footprint.workspace = true
 
 [lints]
 workspace = true
