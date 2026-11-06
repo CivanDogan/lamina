@@ -350,3 +350,179 @@ mod tests {
         assert!((a - exact).abs() < 0.05 && a < exact, "{a}");
     }
 }
+
+/// A polygon with an index over its edges, for fast inside and touch tests
+/// against small shapes (a pour piece of thousands of edges against pads
+/// and tracks).
+pub struct IndexedPoly {
+    edges: Vec<(Point, Point)>,
+    index: crate::Index,
+    bbox: Rect,
+}
+
+impl IndexedPoly {
+    pub fn new(outer: &[Point], holes: &[Vec<Point>]) -> IndexedPoly {
+        let mut edges = Vec::new();
+        for ring in std::iter::once(outer).chain(holes.iter().map(|h| h.as_slice())) {
+            let n = ring.len();
+            for k in 0..n {
+                edges.push((ring[k], ring[(k + 1) % n]));
+            }
+        }
+        let index = crate::Index::new(
+            edges
+                .iter()
+                .map(|(a, b)| Rect::from_points([*a, *b]).unwrap()),
+        );
+        let bbox = Rect::from_points(outer.iter().copied()).unwrap_or(Rect {
+            min: Point::new(0.0, 0.0),
+            max: Point::new(0.0, 0.0),
+        });
+        IndexedPoly { edges, index, bbox }
+    }
+
+    /// Even-odd inside test (holes excluded), counting only the edges a
+    /// ray to +x can cross.
+    pub fn contains(&self, p: Point) -> bool {
+        if p.x < self.bbox.min.x
+            || p.x > self.bbox.max.x
+            || p.y < self.bbox.min.y
+            || p.y > self.bbox.max.y
+        {
+            return false;
+        }
+        let ray = Rect {
+            min: p,
+            max: Point::new(self.bbox.max.x, p.y),
+        };
+        let mut inside = false;
+        for k in self.index.near(&ray, 0.0) {
+            let (a, b) = self.edges[k];
+            if (a.y <= p.y) != (b.y <= p.y) {
+                let x = a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x);
+                if x > p.x {
+                    inside = !inside;
+                }
+            }
+        }
+        inside
+    }
+
+    /// Whether two indexed polygons overlap or come within `eps`.
+    pub fn touches_poly(&self, o: &IndexedPoly, eps: f64) -> bool {
+        let (a, b) = (&self.bbox, &o.bbox);
+        if a.max.x + eps < b.min.x
+            || b.max.x + eps < a.min.x
+            || a.max.y + eps < b.min.y
+            || b.max.y + eps < a.min.y
+        {
+            return false;
+        }
+        if o.edges.first().is_some_and(|e| self.contains(e.0))
+            || self.edges.first().is_some_and(|e| o.contains(e.0))
+        {
+            return true;
+        }
+        o.edges.iter().any(|&(p, q)| {
+            let r = Rect::from_points([p, q]).unwrap();
+            self.index
+                .near(&r, eps)
+                .any(|k| seg_seg(self.edges[k].0, self.edges[k].1, p, q) <= eps)
+        })
+    }
+
+    /// Whether `prim` overlaps the polygon or comes within `eps` of it.
+    pub fn touches(&self, prim: &Prim, eps: f64) -> bool {
+        let bb = prim.bbox();
+        let near = |r: f64| self.index.near(&bb, r + eps);
+        match prim {
+            Prim::Circle { c, r } => {
+                self.contains(*c)
+                    || near(0.0).any(|k| seg_point(self.edges[k].0, self.edges[k].1, *c) <= r + eps)
+            }
+            Prim::Capsule { a, b, r } => {
+                self.contains(*a)
+                    || self.contains(*b)
+                    || near(0.0)
+                        .any(|k| seg_seg(self.edges[k].0, self.edges[k].1, *a, *b) <= r + eps)
+            }
+            Prim::Poly { outer, .. } => {
+                if outer.iter().any(|p| self.contains(*p)) {
+                    return true;
+                }
+                let n = outer.len();
+                near(0.0).any(|k| {
+                    let (a, b) = self.edges[k];
+                    // The pour edge runs inside the pad, or the edges meet.
+                    prim.contains(a)
+                        || (0..n).any(|i| seg_seg(a, b, outer[i], outer[(i + 1) % n]) <= eps)
+                })
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod indexed_tests {
+    use super::*;
+
+    #[test]
+    fn indexed_poly_matches_plain_tests() {
+        let outer = vec![
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Point::new(10.0, 10.0),
+            Point::new(0.0, 10.0),
+        ];
+        let hole = vec![
+            Point::new(4.0, 4.0),
+            Point::new(4.0, 6.0),
+            Point::new(6.0, 6.0),
+            Point::new(6.0, 4.0),
+        ];
+        let ip = IndexedPoly::new(&outer, std::slice::from_ref(&hole));
+        let plain = Prim::Poly {
+            outer: outer.clone(),
+            holes: vec![hole.clone()],
+        };
+        for (x, y) in [
+            (1.0, 1.0),
+            (5.0, 5.0),
+            (11.0, 5.0),
+            (4.5, 7.0),
+            (-1.0, -1.0),
+        ] {
+            let p = Point::new(x, y);
+            assert_eq!(ip.contains(p), plain.contains(p), "{p:?}");
+        }
+        // A track ending in the hole but crossing the pour touches it.
+        let t = Prim::Capsule {
+            a: Point::new(5.0, 5.0),
+            b: Point::new(5.0, 3.0),
+            r: 0.1,
+        };
+        assert!(ip.touches(&t, 1e-6));
+        // A via fully inside the hole, clear of its edges, does not.
+        let v = Prim::Circle {
+            c: Point::new(5.0, 5.0),
+            r: 0.3,
+        };
+        assert!(!ip.touches(&v, 1e-6));
+        // A pad overlapping the outer edge does.
+        let pad = Prim::Poly {
+            outer: vec![
+                Point::new(9.5, 2.0),
+                Point::new(11.0, 2.0),
+                Point::new(11.0, 3.0),
+                Point::new(9.5, 3.0),
+            ],
+            holes: vec![],
+        };
+        assert!(ip.touches(&pad, 1e-6));
+        let away = Prim::Circle {
+            c: Point::new(12.0, 12.0),
+            r: 0.5,
+        };
+        assert!(!ip.touches(&away, 1e-6));
+    }
+}

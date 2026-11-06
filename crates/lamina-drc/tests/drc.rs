@@ -185,3 +185,31 @@ fn presets_exist() {
     assert!(presets::get("jlcpcb-2layer").is_some());
     assert!(presets::get("nope").is_none());
 }
+
+#[test]
+fn two_pours_of_a_net_join_where_they_overlap() {
+    let zone = |id: &str, x: f64, w: f64| Zone {
+        id: id.into(),
+        net: Some("A".into()),
+        layers: vec![Layer::TOP],
+        outline: Contour::rect(x, 5.0, w, 10.0),
+        priority: 0,
+        clearance: None,
+        min_width: None,
+        pad_connection: PadConnection::Solid,
+        thermal_gap: 0.3,
+        thermal_spoke: 0.3,
+    };
+    // R1.2 is near x 10.8, R2.1 near x 19.2: one pour around each pad.
+    let mut d = board();
+    d.routing.zones.push(zone("left", 10.5, 5.0));
+    d.routing.zones.push(zone("right", 14.0, 6.0));
+    let a = analyze(&d);
+    assert!(a.ratsnest.is_empty(), "overlapping pours join: {:?}", a.ratsnest);
+    // With a gap between them the pads stay apart.
+    let mut d = board();
+    d.routing.zones.push(zone("left", 10.5, 3.0));
+    d.routing.zones.push(zone("right", 16.0, 4.0));
+    let a = analyze(&d);
+    assert_eq!(a.ratsnest.len(), 1, "{:?}", a.ratsnest);
+}

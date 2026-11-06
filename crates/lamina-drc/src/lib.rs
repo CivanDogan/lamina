@@ -107,6 +107,22 @@ pub fn analyze(d: &ProjectData) -> Analysis {
         }
     }
     let items = &g.copper;
+    let fill_index: Vec<lamina_geom::prim::IndexedPoly> = items[n_items..]
+        .iter()
+        .map(|it| match &it.prim {
+            Prim::Poly { outer, holes } => lamina_geom::prim::IndexedPoly::new(outer, holes),
+            other => {
+                let b = other.bbox();
+                let r = [
+                    b.min,
+                    Point::new(b.max.x, b.min.y),
+                    b.max,
+                    Point::new(b.min.x, b.max.y),
+                ];
+                lamina_geom::prim::IndexedPoly::new(&r, &[])
+            }
+        })
+        .collect();
     let boxes: Vec<Rect> = items.iter().map(|i| i.prim.bbox()).collect();
     let index = Index::new(boxes.iter().copied());
     let max_cl = rules
@@ -152,8 +168,41 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                 continue;
             }
             let both_fill = i >= n_items && j >= n_items;
-            let dist = a.prim.distance(&b.prim);
             let same_net = a.net.is_some() && a.net == b.net;
+            // Pours are filled clear of other nets: a pour piece only matters
+            // for connectivity with its own net. Skipping the rest saves an
+            // exact distance to a polygon of thousands of edges per pair.
+            if (i >= n_items || j >= n_items) && !same_net {
+                continue;
+            }
+            // A pour piece against a pad or track of its net: an indexed
+            // touch test instead of an exact distance to the whole polygon.
+            let dist = match (i >= n_items, j >= n_items) {
+                (true, false) | (false, true) if same_net => {
+                    let (f, other) = if i >= n_items { (i, b) } else { (j, a) };
+                    if fill_index[f - n_items].touches(&other.prim, 1e-6) {
+                        0.0
+                    } else {
+                        1.0
+                    }
+                }
+                (true, true) => {
+                    // Pieces of one pour are separate by construction; pieces
+                    // of two pours of the net may overlap.
+                    let same_zone = matches!(
+                        (&a.owner, &b.owner),
+                        (Owner::Zone { id: x, .. }, Owner::Zone { id: y, .. }) if x == y
+                    );
+                    if !same_zone
+                        && fill_index[i - n_items].touches_poly(&fill_index[j - n_items], 1e-6)
+                    {
+                        0.0
+                    } else {
+                        1.0
+                    }
+                }
+                _ => a.prim.distance(&b.prim),
+            };
             if dist <= 1e-6 {
                 dsu.union(i, j);
             }
