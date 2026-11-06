@@ -2125,6 +2125,10 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Lamina")
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon.png"))
+                    .expect("icon.png is a valid PNG"),
+            )
             .with_inner_size([1480.0, 920.0])
             .with_min_inner_size([760.0, 480.0])
             .with_maximized(true),

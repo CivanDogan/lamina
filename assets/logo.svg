@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="12 4 44 56" width="88" height="112">
+  <title>Lamina</title>
+  <mask id="holes">
+    <rect x="0" y="0" width="64" height="64" fill="#fff"/>
+    <circle cx="22" cy="14" r="2.6" fill="#000"/>
+    <circle cx="46" cy="50" r="2.4" fill="#000"/>
+  </mask>
+  <g fill="#E08A3C" mask="url(#holes)">
+    <path d="M22 18 V40 L32 50 H42" fill="none" stroke="#E08A3C" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="22" cy="14" r="7"/>
+    <circle cx="46" cy="50" r="6"/>
+  </g>
+</svg>

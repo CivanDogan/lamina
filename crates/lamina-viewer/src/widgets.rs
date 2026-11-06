@@ -8,16 +8,31 @@ use eframe::egui::{
 
 use crate::style::*;
 
-/// Three stacked plates and the name.
+/// The logo (assets/logo.svg: a trace from a pad to a via) and the name.
 pub fn wordmark(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(86.0, 24.0), Sense::hover());
     let p = ui.painter();
     let x = rect.left();
     let cy = rect.center().y;
-    for (i, a) in [(0, 1.0), (1, 0.7), (2, 0.45)] {
-        let y = cy - 5.0 + i as f32 * 4.5;
-        let r = Rect::from_min_size(Pos2::new(x + i as f32 * 1.5, y), Vec2::new(14.0, 2.6));
-        p.rect_filled(r, CornerRadius::same(1), ACCENT.gamma_multiply(a));
+    // Logo units are the SVG's 64 grid; the mark spans y 7..56.5.
+    let k = 0.4;
+    let at = |ux: f32, uy: f32| Pos2::new(x + (ux - 15.0) * k, cy + (uy - 31.75) * k);
+    let trace = [
+        at(22.0, 18.0),
+        at(22.0, 40.0),
+        at(32.0, 50.0),
+        at(42.0, 50.0),
+    ];
+    p.add(egui::Shape::line(
+        trace.to_vec(),
+        Stroke::new(7.0 * k, ACCENT),
+    ));
+    for c in trace {
+        p.circle_filled(c, 3.5 * k, ACCENT);
+    }
+    for (c, r, hole) in [(at(22.0, 14.0), 7.0, 2.6), (at(46.0, 50.0), 6.0, 2.4)] {
+        p.circle_filled(c, r * k, ACCENT);
+        p.circle_filled(c, hole * k, PANEL);
     }
     p.text(
         Pos2::new(x + 22.0, cy),

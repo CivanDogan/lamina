@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+  <title>Lamina</title>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14" fill="#101318" stroke="#222831"/>
+  <path d="M22 18 V40 L32 50 H42" fill="none" stroke="#E08A3C" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="22" cy="14" r="7" fill="#E08A3C"/>
+  <circle cx="22" cy="14" r="2.6" fill="#101318"/>
+  <circle cx="46" cy="50" r="6" fill="#E08A3C"/>
+  <circle cx="46" cy="50" r="2.4" fill="#101318"/>
+</svg>

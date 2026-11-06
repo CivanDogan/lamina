@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.svg" width="72" alt="Lamina logo"></p>
+
 # Lamina
 
 PCB layout for coding agents. A headless engine speaks MCP over stdio, the
