@@ -51,7 +51,38 @@ An agent made this board with the Lamina tools. It is an ESP32-S3 servo controll
 `vendor/jrsonnet-stdlib` is a copy of the Jsonnet standard library without YAML and
 wasm-bindgen. The pinned versions of these two do not agree with egui and wgpu.
 
-## Build
+## Download
+
+Get a prebuilt archive from [GitHub Releases](https://github.com/FarmingOps/lamina/releases).
+If there are no releases yet, use the build instructions below.
+Each archive has `lamina`, `lamina-viewer`, the README and the licence files.
+
+Choose the archive with the suffix for your system:
+
+| System | Archive suffix |
+|---|---|
+| Windows x64 | `x86_64-pc-windows-msvc.zip` |
+| Windows Arm64 | `aarch64-pc-windows-msvc.zip` |
+| Linux x64 | `x86_64-unknown-linux-gnu.tar.gz` |
+| Linux Arm64 | `aarch64-unknown-linux-gnu.tar.gz` |
+| macOS Apple silicon | `aarch64-apple-darwin.tar.gz` |
+| macOS Intel | `x86_64-apple-darwin.tar.gz` |
+
+Extract the archive and put its folder in a permanent location. You can add that
+folder to your `PATH`, or use the full path to each program. On Windows, the
+program names end in `.exe`.
+
+The programs are not signed. See the release notes for the steps to open them on
+Windows and macOS. On Linux, the viewer needs a Vulkan or OpenGL driver and an X11
+or Wayland session. The Linux builds need glibc 2.35 or later.
+
+Each archive has a `.sha256` file. To check a download on Linux, run
+`sha256sum -c <archive>.sha256` in the download folder. On macOS, use
+`shasum -a 256 -c <archive>.sha256`. Replace `<archive>` with the archive filename.
+
+Maintainers: see [Publishing a release](docs/releasing.md).
+
+## Build from source
 
 ```
 cargo build --release
@@ -59,17 +90,20 @@ cargo build --release
 
 ## Connect an MCP client
 
+Use the full path to the `lamina` program from the extracted archive. If you built
+from source, it is in `<repository>/target/release/`. On Windows, use `lamina.exe`.
+
 Claude Code:
 
 ```
-claude mcp add --scope user lamina -- <path>/target/release/lamina mcp
+claude mcp add --scope user lamina -- <path>/lamina mcp
 ```
 
 Codex, in `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.lamina]
-command = "<path>/target/release/lamina"
+command = "<path>/lamina"
 args = ["mcp"]
 ```
 
