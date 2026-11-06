@@ -50,22 +50,58 @@ for ground, `check`, `render`, `export`. Read the user's comments with `notes`.
 ## Viewer
 
 ```
-lamina-viewer [--3d] <project folder>...
+lamina-viewer [--3d] [project folder or board file]...
 ```
 
-Several folders open side by side, one window each; `--3d` starts in the 3D
-view.
+Boards open side by side in one window, each with its own 2D or 3D view;
+`--3d` starts in 3D. The layer panel, inspector, status bar and shortcuts
+follow the board you clicked last. `+` in the top bar or `Ctrl+O` opens a
+Lamina project folder or a KiCad, EasyEDA or Gerber file; files from other
+programs are imported in the background into a project under the local data
+folder and imported again when the source changes. Folders and files can be
+dropped on the window. Without arguments the viewer reopens the boards that
+were open last time.
 
-The viewer watches the folder and redraws whenever files change, and it edits
-the board the way KiCad does: click to select, drag to move, box-select,
-`R` rotate, `F` flip, `L` lock, `M` move, `Del` delete, arrow keys nudge,
-`X` route (with `V` for a via and layer change, `/` to flip the bend),
-`V` via, `Z` pour, `K` keep-out, `O` outline, `N` grid, `Ctrl+Z` / `Ctrl+Y`
-undo and redo. Right-drag or `Space`+drag pans, scroll zooms, `1` / `2`
-switch 2D and 3D. The inspector edits the selected item's values. Edits go
-through the same engine as the tools, so an agent can work on the board at
-the same time; both sides re-read the files before each change. Notes typed
-in the side panel are saved to `notes.json` for the agent.
+The viewer watches the folders and redraws whenever files change, and it
+edits the board the way KiCad does: click to select, drag to move,
+box-select, `R` rotate, `F` flip, `L` lock, `M` move, `Del` delete, arrow
+keys nudge, `X` route (with `V` for a via and layer change, `/` to flip the
+bend), `V` via, `Z` pour, `K` keep-out, `O` outline, `D` measure (snaps to
+pad and via centres), `N` grid, `Ctrl+Z` / `Ctrl+Y` undo and redo,
+`Ctrl+F` find a part, value or net. Right-drag or `Space`+drag pans, scroll
+zooms, `1` / `2` switch 2D and 3D. `F1` lists every shortcut.
+
+The Board menu autoroutes the whole board or the selection's nets (one undo
+step), rips up tracks, and exports fab files (Gerbers, drill, BOM, CPL),
+a STEP assembly or a KiCad board. The inspector edits the selected item's
+values. Edits go through the same engine as the tools, so an agent can work
+on the board at the same time; both sides re-read the files before each
+change. Notes typed in the side panel are saved to `notes.json` for the
+agent.
+
+## Autorouter
+
+`autoroute` (MCP), the viewer's Board menu and `lamina-route` route every
+open connection, or the nets you name, with no outside program:
+
+- each net is routed as a tree that may start or end on any copper already
+  joined to its pads, pour pieces included;
+- nets negotiate for space (PathFinder): wires of different nets may
+  overlap at first, contested cells get dearer each pass, and the nets
+  still overlapping are rerouted until none do;
+- a connection that fails at the class width is tried at the minimum
+  width; what still fails is repaired by taking up the wires around it and
+  routing that neighbourhood again on a grid twice as fine;
+- nets with a pour go last, and after routing the pours are refilled and
+  whatever they leave open is routed too;
+- keep-outs, via keep-outs, hole-to-hole spacing, net class widths and
+  clearances, and copper on layers the router may not use are respected.
+
+On two real KiCad boards with every track removed (pours kept) it finishes
+58 of 58 and 94 of 94 connections in about 12 seconds each with no DRC
+errors, including a USB-C D+/D- crossing between 0.5 mm pads.
+`cargo run --release -p lamina-route --example bench -- <project>` runs the
+same measurement on any board.
 
 ## Modular boards
 
@@ -177,7 +213,7 @@ in Fusion, FreeCAD, SolidWorks and other CAD programs for enclosure work.
 
 ## External autorouters
 
-`export_specctra` / `lamina export-dsn <dir>` write a Specctra DSN of the
+The built-in router is the default. For comparison or habit, `export_specctra` / `lamina export-dsn <dir>` write a Specctra DSN of the
 board, and `import_specctra_session` / `lamina import-ses <file.ses> <dir>`
 read the session back. With [Freerouting](https://github.com/freerouting/freerouting):
 

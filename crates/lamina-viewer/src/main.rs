@@ -1587,7 +1587,13 @@ impl Shell {
         };
         let rs = cc.wgpu_render_state.as_ref();
         for r in roots {
-            s.add(r, &cc.egui_ctx, rs);
+            if ProjectData::is_project(&r) {
+                s.add(r, &cc.egui_ctx, rs);
+            } else {
+                // A board file or a file in a project: imported or resolved
+                // in the background like anything opened later.
+                s.request(OpenRequest::Path(r), &cc.egui_ctx);
+            }
         }
         if s.boards.is_empty() {
             s.boards
@@ -2073,10 +2079,11 @@ fn attach_console() {
     }
 }
 
-const USAGE: &str = "Usage: lamina-viewer [--3d] [BOARD_DIR]...
+const USAGE: &str = "Usage: lamina-viewer [--3d] [BOARD_DIR | BOARD_FILE]...
 
-Opens the Lamina project folders side by side in one window. Without a
-folder it reopens the boards that were open last time. More boards open
+Opens Lamina project folders, or KiCad, EasyEDA and Gerber files (imported
+on the fly), side by side in one window. Without arguments it reopens the
+boards that were open last time. More boards open
 with + in the top bar or by dropping a folder on the window.
 
   --3d  start in the 3D view";
