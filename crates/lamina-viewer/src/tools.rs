@@ -1459,7 +1459,11 @@ fn kv(ui: &mut egui::Ui, k: &str) {
 }
 
 fn val(ui: &mut egui::Ui, v: impl Into<String>) {
-    ui.label(egui::RichText::new(v.into()).font(mono(12.0)).color(TEXT));
+    let v = v.into();
+    ui.add(
+        egui::Label::new(egui::RichText::new(v.clone()).font(mono(12.0)).color(TEXT)).truncate(),
+    )
+    .on_hover_text(v);
 }
 
 impl App {

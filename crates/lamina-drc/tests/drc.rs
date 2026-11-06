@@ -205,7 +205,11 @@ fn two_pours_of_a_net_join_where_they_overlap() {
     d.routing.zones.push(zone("left", 10.5, 5.0));
     d.routing.zones.push(zone("right", 14.0, 6.0));
     let a = analyze(&d);
-    assert!(a.ratsnest.is_empty(), "overlapping pours join: {:?}", a.ratsnest);
+    assert!(
+        a.ratsnest.is_empty(),
+        "overlapping pours join: {:?}",
+        a.ratsnest
+    );
     // With a gap between them the pads stay apart.
     let mut d = board();
     d.routing.zones.push(zone("left", 10.5, 3.0));

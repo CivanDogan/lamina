@@ -136,6 +136,8 @@ pub(crate) struct App {
     pub(crate) focused: bool,
     /// Asked for from the empty state; the shell carries it out.
     pub(crate) request: Option<OpenRequest>,
+    /// Canvas size in pixels at the last frame, for zooming from the panels.
+    last_size_px: Vec2,
     /// Exports and other background jobs whose result becomes a toast.
     bg: Vec<std::sync::mpsc::Receiver<actions::BgDone>>,
     find: Option<actions::Find>,
@@ -212,6 +214,7 @@ impl App {
             open_path: String::new(),
             focused: true,
             request: None,
+            last_size_px: Vec2::new(900.0, 700.0),
             bg: Vec::new(),
             find: None,
             help: false,
@@ -849,7 +852,7 @@ impl App {
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui) {
-        let size_hint = Vec2::new(900.0, 700.0);
+        let size_hint = self.last_size_px;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -1025,12 +1028,14 @@ impl App {
                         .chars()
                         .next()
                         .is_some_and(|c| c.is_ascii_digit() || c == '-');
-                    let rt = egui::RichText::new(v).color(TEXT);
-                    ui.label(if mono_like {
+                    let rt = egui::RichText::new(v.clone()).color(TEXT);
+                    let rt = if mono_like {
                         rt.font(mono(12.0))
                     } else {
                         rt.font(body(12.5))
-                    });
+                    };
+                    // Cut long values short instead of widening the panel.
+                    ui.add(egui::Label::new(rt).truncate()).on_hover_text(v);
                     ui.end_row();
                 }
             });
@@ -1133,6 +1138,7 @@ impl App {
         let w = (rect.width() * ppp).round().max(1.0) as u32;
         let h = (rect.height() * ppp).round().max(1.0) as u32;
         let size_px = Vec2::new(w as f32, h as f32);
+        self.last_size_px = size_px;
         if self.gpu.is_none() {
             return;
         }
