@@ -14,20 +14,9 @@ fn main() {
         let before_tracks = d.routing.tracks.len();
         d.routing.tracks.clear();
         d.routing.vias.clear();
-        // Nets that a zone carries are left to the pour, as a designer would.
-        let poured: Vec<String> = d
-            .routing
-            .zones
-            .iter()
-            .filter_map(|z| z.net.clone())
-            .collect();
-        let todo = lamina_drc::analyze(&d)
-            .ratsnest
-            .iter()
-            .filter(|e| !poured.contains(&e.net))
-            .count();
+        // Poured nets are routed only where the pour does not reach.
+        let todo = lamina_drc::analyze(&d).ratsnest.len();
         let opt = lamina_route::RouteOptions {
-            skip: poured.clone(),
             time_limit: Some(300.0),
             grid: std::env::var("GRID").ok().and_then(|g| g.parse().ok()),
             ..Default::default()
@@ -43,11 +32,14 @@ fn main() {
         d.routing.tracks.extend(out.tracks.iter().cloned());
         d.routing.vias.extend(out.vias.iter().cloned());
         let a = lamina_drc::analyze(&d);
-        let left = a
-            .ratsnest
-            .iter()
-            .filter(|e| !poured.contains(&e.net))
-            .count();
+        // SAVE=<folder>: write the routed board there (a copy of the project).
+        if let Ok(to) = std::env::var("SAVE") {
+            let to =
+                std::path::Path::new(&to).join(std::path::Path::new(&dir).file_name().unwrap());
+            d.save(&to, FileKind::Routing).expect("save");
+            println!("  saved to {}", to.display());
+        }
+        let left = a.ratsnest.len();
         let errors: Vec<&Violation> = a
             .violations
             .iter()
@@ -68,6 +60,9 @@ fn main() {
         }
         if !rules.is_empty() {
             println!("  errors by rule: {rules:?}");
+        }
+        for e in a.ratsnest.iter().take(8) {
+            println!("  open {} {} -> {}", e.net, e.from, e.to);
         }
         for f in out.failed.iter().take(8) {
             println!("  failed {} {} -> {}: {}", f.net, f.from, f.to, f.reason);

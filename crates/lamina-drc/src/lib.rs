@@ -25,6 +25,10 @@ pub struct Analysis {
     pub ratsnest: Vec<Ratsnest>,
     pub fills: Vec<ZoneFill>,
     pub geometry: BoardGeometry,
+    /// Connected-copper island of each `geometry.copper` item.
+    pub island: Vec<usize>,
+    /// Island of each fill polygon, per fill (empty for non-copper layers).
+    pub fill_island: Vec<Vec<usize>>,
 }
 
 struct Dsu(Vec<usize>);
@@ -120,6 +124,22 @@ pub fn analyze(d: &ProjectData) -> Analysis {
             dsu.union(i, j);
         } else {
             by_body.insert(it.owner.body(), i);
+        }
+    }
+    // Pads of one part with the same number are one terminal, joined inside
+    // the part (a switch's paired legs, a connector's shield tabs).
+    let mut by_pad: HashMap<(&str, &str), usize> = HashMap::new();
+    for (i, it) in items.iter().enumerate() {
+        if let Owner::Pad { part, pad, .. } = &it.owner {
+            if pad.is_empty() {
+                continue;
+            }
+            match by_pad.get(&(part.as_str(), pad.as_str())) {
+                Some(&j) => dsu.union(i, j),
+                None => {
+                    by_pad.insert((part.as_str(), pad.as_str()), i);
+                }
+            }
         }
     }
     for (i, a) in items.iter().enumerate() {
@@ -589,12 +609,27 @@ pub fn analyze(d: &ProjectData) -> Analysis {
         }
     }
 
+    let island: Vec<usize> = (0..n_items).map(|i| dsu.find(i)).collect();
+    let mut k = n_items;
+    let fill_island = fills
+        .iter()
+        .map(|f| {
+            if f.layer.copper().is_none() {
+                return Vec::new();
+            }
+            let v: Vec<usize> = (k..k + f.polygons.len()).map(|i| dsu.find(i)).collect();
+            k += f.polygons.len();
+            v
+        })
+        .collect();
     g.copper.truncate(n_items);
     Analysis {
         violations: v,
         ratsnest,
         fills,
         geometry: g,
+        island,
+        fill_island,
     }
 }
 

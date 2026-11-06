@@ -15,7 +15,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap};
 use std::time::{Duration, Instant};
 
-use lamina_geom::prim::{Prim, ring_contains, seg_point};
+use lamina_geom::prim::{Prim, seg_point};
 use lamina_model::*;
 use serde::{Deserialize, Serialize};
 
@@ -117,6 +117,40 @@ impl Grid {
     }
 }
 
+/// Cells whose centres lie inside a polygon with holes (even-odd scanline).
+fn raster(g: &Grid, outer: &[Point], holes: &[Vec<Point>], l: usize, out: &mut Vec<usize>) {
+    let Some(bb) = Rect::from_points(outer.iter().copied()) else {
+        return;
+    };
+    let (_, y0, _, y1) = g.range(&bb, 0.0);
+    let mut xs: Vec<f64> = Vec::new();
+    for iy in y0..=y1 {
+        let y = g.y0 + iy as f64 * g.pitch;
+        xs.clear();
+        for ring in std::iter::once(outer).chain(holes.iter().map(|h| h.as_slice())) {
+            let n = ring.len();
+            for k in 0..n {
+                let (a, b) = (ring[k], ring[(k + 1) % n]);
+                if (a.y <= y) != (b.y <= y) {
+                    xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
+                }
+            }
+        }
+        xs.sort_by(f64::total_cmp);
+        for pair in xs.as_chunks::<2>().0 {
+            let lo = ((pair[0] - g.x0) / g.pitch).ceil().max(0.0) as usize;
+            let hi = ((pair[1] - g.x0) / g.pitch).floor();
+            if hi < 0.0 {
+                continue;
+            }
+            let hi = (hi as usize).min(g.nx - 1);
+            for ix in lo..=hi {
+                out.push(g.idx(l, ix, iy));
+            }
+        }
+    }
+}
+
 fn point_prim(p: Point) -> Prim {
     Prim::Circle { c: p, r: 0.0 }
 }
@@ -162,6 +196,9 @@ struct Routed {
     vias: Vec<(usize, usize)>,
     /// Profile index of each path.
     path_profile: Vec<usize>,
+    /// Coverage per profile, filled on demand (geometry never changes
+    /// after a `Routed` is built).
+    cov: Vec<Vec<u32>>,
 }
 
 struct Ctx<'a> {
@@ -207,18 +244,27 @@ impl<'a> Ctx<'a> {
                 edges.push((r[k], r[(k + 1) % r.len()]));
             }
         }
-        let cutouts: Vec<Vec<Point>> = rings[1..].to_vec();
-        let mut edge_dist = vec![0f32; g.plane()];
-        for iy in 0..g.ny {
-            for ix in 0..g.nx {
-                let p = g.center(ix, iy);
-                let inside =
-                    ring_contains(&outline, p) && !cutouts.iter().any(|c| ring_contains(c, p));
-                let dmin = edges
-                    .iter()
-                    .map(|(a, b)| seg_point(*a, *b, p))
-                    .fold(f64::INFINITY, f64::min);
-                edge_dist[iy * g.nx + ix] = if inside { dmin as f32 } else { -(dmin as f32) };
+        // Inside test by scanline, distance only within a band of the edge
+        // (nothing needs more): O(cells + edges * band) instead of
+        // O(cells * edges).
+        let mut inside_cells = Vec::new();
+        raster(&g, &rings[0], &rings[1..], 0, &mut inside_cells);
+        let band = 2.0f32;
+        let mut edge_dist = vec![-band; g.plane()];
+        for c in inside_cells {
+            edge_dist[c] = band;
+        }
+        for (a, b) in &edges {
+            let r = Rect::from_points([*a, *b]).unwrap();
+            let (x0, y0, x1, y1) = g.range(&r, band as f64);
+            for iy in y0..=y1 {
+                for ix in x0..=x1 {
+                    let k = iy * g.nx + ix;
+                    let dd = seg_point(*a, *b, g.center(ix, iy)) as f32;
+                    if dd < edge_dist[k].abs() {
+                        edge_dist[k] = dd.copysign(edge_dist[k]);
+                    }
+                }
             }
         }
         let mut allowed = vec![true; nl];
@@ -472,11 +518,21 @@ impl<'a> Ctx<'a> {
     /// Add (or remove) a net's geometry to every profile's occupancy. The
     /// coverage is recomputed, so a profile made after the net was stamped
     /// (and stamped with it then) is undone too.
-    fn stamp(&mut self, r: &Routed, add: bool) {
+    /// Fill the coverage cache up to the current number of profiles.
+    fn ensure_cov(&self, r: &mut Routed) {
+        while r.cov.len() < self.profiles.len() {
+            let pi = r.cov.len();
+            let c = self.coverage(r, pi);
+            r.cov.push(c);
+        }
+    }
+
+    fn stamp(&mut self, r: &mut Routed, add: bool) {
+        self.ensure_cov(r);
         for pi in 0..self.profiles.len() {
-            let cov = self.coverage(r, pi);
+            let cov = &r.cov[pi];
             let occ = &mut self.profiles[pi].occ;
-            for &c in &cov {
+            for &c in cov {
                 let o = &mut occ[c as usize];
                 *o = if add {
                     o.saturating_add(1)
@@ -788,6 +844,8 @@ struct NetJob {
     conns: Vec<Conn>,
     /// Pad label to (cells, centre).
     pads: HashMap<String, (Vec<usize>, Point)>,
+    /// Pad label to the cells of other copper already joined to the pad.
+    islands: HashMap<String, Vec<usize>>,
     length: f64,
 }
 
@@ -823,6 +881,19 @@ fn route_net(
     }
     let normal = ctx.profile_for(&job.name, false);
     let narrow = ctx.profile_for(&job.name, true);
+    // Island cells near other nets' copper would start a track too close.
+    let npi = ctx.statics(normal, all);
+    for (label, &gi) in &group {
+        if let Some(cells) = job.islands.get(*label) {
+            let st = &ctx.profiles[npi];
+            cells_of[gi].extend(
+                cells
+                    .iter()
+                    .copied()
+                    .filter(|&c| st.owner[c] == FREE || st.owner[c] == job.id),
+            );
+        }
+    }
     let mut vias: Vec<(Point, f64)> = other_vias.to_vec();
     for (ci, c) in job.conns.iter().enumerate() {
         let (Some(&ga), Some(&gb)) = (group.get(c.from.as_str()), group.get(c.to.as_str())) else {
@@ -864,6 +935,9 @@ fn route_net(
             ));
             continue;
         };
+        // A start cell that is already a target: the groups touch, so they
+        // merge without a wire.
+        let wire = path.len() >= 2;
         let g = &ctx.g;
         for w in path.windows(2) {
             if w[0] / g.plane() != w[1] / g.plane() {
@@ -886,19 +960,27 @@ fn route_net(
                 *v = keep;
             }
         }
-        r.paths.push(path);
-        r.path_profile.push(pi);
+        if wire {
+            r.paths.push(path);
+            r.path_profile.push(pi);
+        }
     }
     (r, failed)
 }
 
-/// Whether net `ni`'s geometry sits on another net's (it is unstamped).
-fn in_conflict(ctx: &Ctx, r: &Routed) -> Vec<usize> {
+/// Cells where a stamped net's geometry sits on another net's: occupancy
+/// above the net's own share.
+fn in_conflict(ctx: &Ctx, r: &mut Routed) -> Vec<usize> {
+    ctx.ensure_cov(r);
     let g = &ctx.g;
     let mut bad = Vec::new();
+    let others = |pi: usize, c: usize| {
+        let own = r.cov[pi].binary_search(&(c as u32)).is_ok() as u16;
+        ctx.profiles[pi].occ[c] > own
+    };
     for (k, path) in r.paths.iter().enumerate() {
-        let occ = &ctx.profiles[r.path_profile[k]].occ;
-        bad.extend(path.iter().copied().filter(|&c| occ[c] > 0));
+        let pi = r.path_profile[k];
+        bad.extend(path.iter().copied().filter(|&c| others(pi, c)));
     }
     for &(cell, pi) in &r.vias {
         let st = &ctx.profiles[pi];
@@ -910,7 +992,7 @@ fn in_conflict(ctx: &Ctx, r: &Routed) -> Vec<usize> {
             }
             for l in 0..g.nl {
                 let j = g.idx(l, x as usize, y as usize);
-                if st.occ[j] > 0 {
+                if others(pi, j) {
                     bad.push(j);
                 }
             }
@@ -920,39 +1002,112 @@ fn in_conflict(ctx: &Ctx, r: &Routed) -> Vec<usize> {
 }
 
 /// Route every unrouted connection that the options select. Connections
-/// that fail on the grid are tried again on a grid twice as fine, with
-/// what was routed so far kept fixed (unless a grid was given).
+/// that fail are repaired: the new wires around them are taken up and
+/// routed again together with them on a grid twice as fine.
 pub fn autoroute(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, String> {
     let start = Instant::now();
-    let mut out = route_once(d, opt)?;
     let limit = opt.time_limit.unwrap_or(60.0).clamp(1.0, 3600.0);
-    let left = limit - start.elapsed().as_secs_f64();
-    if out.failed.is_empty() || opt.grid.is_some() || left < 2.0 {
-        return Ok(out);
+    let left = || limit - start.elapsed().as_secs_f64();
+    let mut out = route_once(d, opt)?;
+    if !out.failed.is_empty() && left() > 2.0 {
+        repair(d, &mut out, opt, left())?;
     }
-    // Around the failures, take the new wires up again so the fine pass can
-    // negotiate the whole neighbourhood.
-    let analysis = lamina_drc::analyze(d);
-    let mut region: Option<Rect> = None;
-    for f in &out.failed {
-        for e in analysis
+    // New tracks cut pours into islands: route what the refilled pours now
+    // leave open, then repair what that cannot reach.
+    for _ in 0..5 {
+        if left() < 2.0 {
+            break;
+        }
+        let d2 = with_routes(d, &out);
+        let failed: BTreeSet<(String, String, String)> = out
+            .failed
+            .iter()
+            .map(|f| (f.net.clone(), f.from.clone(), f.to.clone()))
+            .collect();
+        let analysis = lamina_drc::analyze(&d2);
+        let mut open: Vec<String> = analysis
             .ratsnest
             .iter()
-            .filter(|e| e.net == f.net && e.from == f.from && e.to == f.to)
+            .filter(|e| {
+                selected(opt, &e.net)
+                    && !failed.contains(&(e.net.clone(), e.from.clone(), e.to.clone()))
+            })
+            .map(|e| e.net.clone())
+            .collect();
+        open.sort();
+        open.dedup();
+        if open.is_empty() {
+            break;
+        }
+        let opt2 = RouteOptions {
+            nets: Some(open),
+            time_limit: Some(left()),
+            ..opt.clone()
+        };
+        let more = route_once_with(&d2, &opt2, Some(analysis))?;
+        let progress = !more.tracks.is_empty() || !more.vias.is_empty();
+        out.tracks.extend(more.tracks);
+        out.vias.extend(more.vias);
+        out.routed.extend(more.routed);
+        out.failed.extend(more.failed);
+        out.passes += more.passes;
+        if !out.failed.is_empty() && left() > 2.0 {
+            repair(d, &mut out, opt, left())?;
+        } else if !progress {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+fn selected(opt: &RouteOptions, net: &str) -> bool {
+    !opt.skip.iter().any(|s| s == net)
+        && opt.nets.as_ref().is_none_or(|n| n.iter().any(|x| x == net))
+}
+
+fn with_routes(d: &ProjectData, out: &RouteOutcome) -> ProjectData {
+    let mut d2 = d.clone();
+    d2.routing.tracks.extend(out.tracks.iter().cloned());
+    d2.routing.vias.extend(out.vias.iter().cloned());
+    d2
+}
+
+/// Where a pad label (`U1.3`) is on the board.
+fn pad_point(d: &ProjectData, label: &str) -> Option<Point> {
+    let pr: PadRef = label.parse().ok()?;
+    let part = d.parts.parts.get(&pr.part)?;
+    let pl = d.placement.placements.get(&pr.part)?;
+    let fp = d.footprints.get(&part.footprint)?;
+    fp.pads
+        .iter()
+        .find(|p| p.number == pr.pad)
+        .map(|p| pl.transform(p.at))
+}
+
+/// Take up the new wires around the failed connections and route those nets
+/// again, together with the failed ones, on a grid twice as fine (unless a
+/// grid was given). The failures in `out` are replaced by what still fails.
+fn repair(
+    d: &ProjectData,
+    out: &mut RouteOutcome,
+    opt: &RouteOptions,
+    left: f64,
+) -> Result<(), String> {
+    let mut region: Option<Rect> = None;
+    for f in &out.failed {
+        for p in [pad_point(d, &f.from), pad_point(d, &f.to)]
+            .into_iter()
+            .flatten()
         {
-            let r = Rect::from_points([e.a, e.b]).unwrap();
+            let r = Rect { min: p, max: p };
             region = Some(region.map_or(r, |q| q.union(&r)));
         }
     }
     let mut nets: BTreeSet<String> = out.failed.iter().map(|f| f.net.clone()).collect();
     if let Some(r) = region {
         let m = 3.0;
-        let near = Rect {
-            min: Point::new(r.min.x - m, r.min.y - m),
-            max: Point::new(r.max.x + m, r.max.y + m),
-        };
         let inside = |p: &Point| {
-            p.x >= near.min.x && p.x <= near.max.x && p.y >= near.min.y && p.y <= near.max.y
+            p.x >= r.min.x - m && p.x <= r.max.x + m && p.y >= r.min.y - m && p.y <= r.max.y + m
         };
         for t in &out.tracks {
             if t.points.iter().any(inside) {
@@ -965,17 +1120,19 @@ pub fn autoroute(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, St
             }
         }
     }
+    nets.retain(|n| selected(opt, n));
+    if nets.is_empty() {
+        return Ok(());
+    }
     out.tracks.retain(|t| !nets.contains(&t.net));
     out.vias.retain(|v| !nets.contains(&v.net));
     out.routed
         .retain(|r| r.split_once(':').is_none_or(|(n, _)| !nets.contains(n)));
-    let mut d2 = d.clone();
-    d2.routing.tracks.extend(out.tracks.iter().cloned());
-    d2.routing.vias.extend(out.vias.iter().cloned());
-    let nets: Vec<String> = nets.into_iter().collect();
+    out.failed.retain(|f| !nets.contains(&f.net));
+    let d2 = with_routes(d, out);
     let opt2 = RouteOptions {
-        nets: Some(nets),
-        grid: Some(0.05),
+        nets: Some(nets.into_iter().collect()),
+        grid: Some(opt.grid.unwrap_or(0.05)),
         time_limit: Some(left),
         ..opt.clone()
     };
@@ -983,15 +1140,33 @@ pub fn autoroute(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, St
     out.tracks.extend(fine.tracks);
     out.vias.extend(fine.vias);
     out.routed.extend(fine.routed);
-    out.failed = fine.failed;
+    out.failed.extend(fine.failed);
     out.passes += fine.passes;
-    Ok(out)
+    Ok(())
 }
 
 fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, String> {
+    route_once_with(d, opt, None)
+}
+
+/// One routing run; `analysis` is the DRC analysis of `d` when the caller
+/// already has it.
+fn route_once_with(
+    d: &ProjectData,
+    opt: &RouteOptions,
+    analysis: Option<lamina_drc::Analysis>,
+) -> Result<RouteOutcome, String> {
+    let t0 = Instant::now();
+    let dbg = std::env::var_os("LAMINA_ROUTE_DEBUG").is_some();
     let mut ctx = Ctx::new(d, opt)?;
+    if dbg {
+        eprintln!("ctx {:?} grid {}", t0.elapsed(), ctx.g.pitch);
+    }
     let via_cost = opt.via_cost.unwrap_or(25.0) as f32;
-    let analysis = lamina_drc::analyze(d);
+    let analysis = analysis.unwrap_or_else(|| lamina_drc::analyze(d));
+    if dbg {
+        eprintln!("analyze {:?}", t0.elapsed());
+    }
     let mut edges = analysis.ratsnest.clone();
     edges.retain(|e| {
         !opt.skip.contains(&e.net) && opt.nets.as_ref().is_none_or(|n| n.contains(&e.net))
@@ -1009,6 +1184,7 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
             id,
             conns: Vec::new(),
             pads: HashMap::new(),
+            islands: HashMap::new(),
             length: 0.0,
         });
         job.length += e.a.dist(e.b);
@@ -1017,6 +1193,48 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
             to: e.to.clone(),
         });
     }
+    // Copper already joined to a pad (pads, tracks, vias, pour pieces) is
+    // part of it for routing: a connection may start or end anywhere on it.
+    let copper = &analysis.geometry.copper;
+    let pad_island: HashMap<(&str, &str), usize> = copper
+        .iter()
+        .enumerate()
+        .filter_map(|(i, it)| match &it.owner {
+            lamina_geom::Owner::Pad { part, pad, .. } => {
+                Some(((part.as_str(), pad.as_str()), analysis.island[i]))
+            }
+            _ => None,
+        })
+        .collect();
+    let mut island_cells: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut cells_of_island = |root: usize, ctx: &Ctx| -> Vec<usize> {
+        island_cells
+            .entry(root)
+            .or_insert_with(|| {
+                let mut out = Vec::new();
+                for (i, it) in copper.iter().enumerate() {
+                    if analysis.island[i] == root {
+                        out.extend(ctx.cells_in(&it.prim, &[it.layer]));
+                    }
+                }
+                for (f, roots) in analysis.fills.iter().zip(&analysis.fill_island) {
+                    let Some(c) = f.layer.copper() else { continue };
+                    let l = c.index(layers) as usize;
+                    if l >= ctx.g.nl || !ctx.allowed[l] {
+                        continue;
+                    }
+                    for (poly, &r) in f.polygons.iter().zip(roots) {
+                        if r == root {
+                            raster(&ctx.g, &poly.outer, &poly.holes, l, &mut out);
+                        }
+                    }
+                }
+                out.sort_unstable();
+                out.dedup();
+                out
+            })
+            .clone()
+    };
     for job in jobs.values_mut() {
         job.conns
             .sort_by(|a, b| a.from.cmp(&b.from).then(a.to.cmp(&b.to)));
@@ -1026,6 +1244,7 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
             .flat_map(|c| [c.from.clone(), c.to.clone()])
             .collect();
         for label in labels {
+            let label_key = label.clone();
             let Ok(pr) = label.parse::<PadRef>() else {
                 continue;
             };
@@ -1043,14 +1262,32 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
                 .find(|(p, ..)| p.number == pr.pad)
             {
                 let cells = ctx.cells_in(&prim, &ls);
+                let island = pad_island
+                    .get(&(pr.part.as_str(), pr.pad.as_str()))
+                    .map(|&root| cells_of_island(root, &ctx))
+                    .unwrap_or_default();
                 if !cells.is_empty() {
                     job.pads.insert(label, (cells, pl.transform(p.at)));
+                    job.islands.insert(label_key, island);
                 }
             }
         }
     }
+    // Short nets first; nets with a pour last, since the pour joins most of
+    // their pads and only what it leaves open is in the ratsnest.
+    let poured: BTreeSet<&str> = d
+        .routing
+        .zones
+        .iter()
+        .filter_map(|z| z.net.as_deref())
+        .collect();
     let mut order: Vec<String> = jobs.keys().cloned().collect();
-    order.sort_by(|a, b| jobs[a].length.total_cmp(&jobs[b].length));
+    order.sort_by(|a, b| {
+        poured
+            .contains(a.as_str())
+            .cmp(&poured.contains(b.as_str()))
+            .then(jobs[a].length.total_cmp(&jobs[b].length))
+    });
     let n_nets = ctx.net_ids.len();
     let mut routed: Vec<Routed> = vec![Routed::default(); n_nets];
     let mut failures: BTreeMap<String, Vec<(usize, String)>> = BTreeMap::new();
@@ -1073,20 +1310,26 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
             .collect()
     };
 
+    if dbg {
+        eprintln!("jobs {:?} ({} nets)", t0.elapsed(), order.len());
+    }
     for pass in 0..passes {
         used = pass + 1;
+        if dbg {
+            eprintln!("pass {pass} at {:?}, {} nets", t0.elapsed(), todo.len());
+        }
         for name in &todo {
             if Instant::now() > ctx.deadline {
                 break;
             }
             let job = &jobs[name];
             let ni = job.id as usize;
-            let old = std::mem::take(&mut routed[ni]);
+            let mut old = std::mem::take(&mut routed[ni]);
             if !old.paths.is_empty() {
-                ctx.stamp(&old, false);
+                ctx.stamp(&mut old, false);
             }
             let others = new_vias(&routed, &ctx, job.id);
-            let (r, failed) = route_net(
+            let (mut r, failed) = route_net(
                 &mut ctx,
                 &mut search,
                 job,
@@ -1095,7 +1338,7 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
                 &routed,
                 &others,
             );
-            ctx.stamp(&r, true);
+            ctx.stamp(&mut r, true);
             routed[ni] = r;
             failures.insert(name.clone(), failed);
         }
@@ -1103,15 +1346,10 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
         let mut conflicted = Vec::new();
         for name in &order {
             let ni = jobs[name].id as usize;
-            let r = std::mem::take(&mut routed[ni]);
-            if r.paths.is_empty() {
-                routed[ni] = r;
+            if routed[ni].paths.is_empty() {
                 continue;
             }
-            ctx.stamp(&r, false);
-            let bad = in_conflict(&ctx, &r);
-            ctx.stamp(&r, true);
-            routed[ni] = r;
+            let bad = in_conflict(&ctx, &mut routed[ni]);
             if !bad.is_empty() {
                 for c in bad {
                     ctx.hist[c] += 1.0;
@@ -1127,16 +1365,19 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
         pres *= 1.6;
     }
 
+    if dbg {
+        eprintln!("negotiated {:?}, {} left", t0.elapsed(), todo.len());
+    }
     // Still overlapping: route those nets strictly around the rest.
     for name in &todo {
         let job = &jobs[name];
         let ni = job.id as usize;
-        let old = std::mem::take(&mut routed[ni]);
+        let mut old = std::mem::take(&mut routed[ni]);
         if !old.paths.is_empty() {
-            ctx.stamp(&old, false);
+            ctx.stamp(&mut old, false);
         }
         let others = new_vias(&routed, &ctx, job.id);
-        let (r, failed) = route_net(
+        let (mut r, failed) = route_net(
             &mut ctx,
             &mut search,
             job,
@@ -1145,7 +1386,7 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
             &routed,
             &others,
         );
-        ctx.stamp(&r, true);
+        ctx.stamp(&mut r, true);
         routed[ni] = r;
         failures.insert(name.clone(), failed);
     }
@@ -1160,12 +1401,12 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
     for name in &order {
         let job = &jobs[name];
         let ni = job.id as usize;
-        let r = std::mem::take(&mut routed[ni]);
+        let mut r = std::mem::take(&mut routed[ni]);
         if r.paths.is_empty() {
             routed[ni] = r;
             continue;
         }
-        ctx.stamp(&r, false);
+        ctx.stamp(&mut r, false);
         let g = &ctx.g;
         // Path ends are junctions or pads: keep them as vertices.
         let pinned: BTreeSet<usize> = r
@@ -1291,7 +1532,7 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
                 to: None,
             });
         }
-        ctx.stamp(&straight, true);
+        ctx.stamp(&mut straight, true);
         routed[ni] = straight;
     }
 
