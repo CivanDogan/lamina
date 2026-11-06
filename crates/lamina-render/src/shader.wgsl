@@ -69,10 +69,12 @@ fn tonemap(c: vec3<f32>) -> vec3<f32> {
 fn shade(albedo: vec3<f32>, n0: vec3<f32>, world: vec3<f32>, gloss: f32) -> vec3<f32> {
     let n = normalize(n0);
     let v = normalize(u.eye.xyz - world);
-    let l1 = normalize(vec3<f32>(-0.45, -0.6, 0.75));
-    let l2 = normalize(vec3<f32>(0.6, 0.35, 0.45));
-    let l3 = normalize(vec3<f32>(0.15, 0.85, -0.35));
-    let hemi = mix(vec3<f32>(0.10, 0.10, 0.11), vec3<f32>(0.40, 0.43, 0.50), n.z * 0.5 + 0.5);
+    // The light rig follows the side being viewed: +1 from above, -1 from below.
+    let s = select(1.0, -1.0, u.params.x < 0.0);
+    let l1 = normalize(vec3<f32>(-0.45, -0.6, 0.75 * s));
+    let l2 = normalize(vec3<f32>(0.6, 0.35, 0.45 * s));
+    let l3 = normalize(vec3<f32>(0.15, 0.85, -0.35 * s));
+    let hemi = mix(vec3<f32>(0.10, 0.10, 0.11), vec3<f32>(0.40, 0.43, 0.50), n.z * s * 0.5 + 0.5);
     let d = max(dot(n, l1), 0.0) * vec3<f32>(1.0, 0.96, 0.90) * 0.95
           + max(dot(n, l2), 0.0) * vec3<f32>(0.70, 0.80, 1.0) * 0.35
           + max(dot(n, l3), 0.0) * vec3<f32>(0.9, 0.9, 1.0) * 0.18;

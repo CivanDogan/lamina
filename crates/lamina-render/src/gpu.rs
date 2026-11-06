@@ -771,6 +771,8 @@ impl Gpu {
             .to_cols_array_2d();
         let e = cam.eye();
         u.eye = [e.x, e.y, e.z, 1.0];
+        // Light from the side the camera is on, so the bottom is not in shadow.
+        u.params[0] = if e.z < cam.target[2] { -1.0 } else { 1.0 };
         u.bg_top = [0.085, 0.095, 0.120, 1.0];
         u.bg_bot = [0.012, 0.013, 0.017, 1.0];
         self.write_uniforms(&u);
