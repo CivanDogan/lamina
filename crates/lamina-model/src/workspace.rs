@@ -254,13 +254,14 @@ mod tests {
 
     #[test]
     fn find_from_a_relative_path() {
-        let t = tempfile::tempdir().unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        // Relative paths cannot cross Windows drives. Keep the fixture on this drive.
+        let t = tempfile::tempdir_in(&cwd).unwrap();
         let root = t.path().join("ws");
         let board = root.join("boards/a");
         std::fs::create_dir_all(&board).unwrap();
         Workspace::create(&root, "demo").unwrap();
         // `.` in the board, written relative to the current directory.
-        let cwd = std::env::current_dir().unwrap();
         let rel: PathBuf = cwd
             .components()
             .skip(1)
