@@ -2623,6 +2623,7 @@ dependencies = [
  "lamina-geom",
  "lamina-model",
  "lamina-render",
+ "lamina-route",
  "lamina-scene",
  "notify",
  "rfd",

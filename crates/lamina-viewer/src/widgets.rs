@@ -389,11 +389,25 @@ pub fn note_row(ui: &mut egui::Ui, n: &lamina_model::Note) {
 }
 
 /// Quiet hint along the bottom of the canvas.
+/// Hint line at the bottom of the canvas. Items (split by ` · `) are
+/// dropped from the end until it fits.
 pub fn hint(p: &egui::Painter, rect: Rect, text: &str) {
+    let room = rect.width() - 160.0;
+    let items: Vec<&str> = text.split(" · ").collect();
+    let mut n = items.len();
+    let mut line = text.to_string();
+    while n > 1 && p.layout_no_wrap(line.clone(), body(12.0), TEXT_3).size().x > room {
+        n -= 1;
+        line = format!("{} · F1 for more", items[..n].join(" · "));
+    }
+    // Centred in the space right of the scale bar.
     p.text(
-        Pos2::new(rect.center().x, rect.bottom() - 16.0),
+        Pos2::new(
+            rect.left() + 140.0 + (rect.width() - 140.0) / 2.0,
+            rect.bottom() - 16.0,
+        ),
         Align2::CENTER_CENTER,
-        text,
+        line,
         body(12.0),
         TEXT_3,
     );
@@ -401,6 +415,27 @@ pub fn hint(p: &egui::Painter, rect: Rect, text: &str) {
 
 /// Toolbar button: label with its shortcut key, accent when active.
 pub fn tool_button(ui: &mut egui::Ui, label: &str, key: &str, active: bool) -> egui::Response {
+    // Compact form: the key letter alone.
+    if label.is_empty() {
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(28.0, 28.0), Sense::click());
+        let p = ui.painter();
+        if active {
+            p.rect_filled(rect, CornerRadius::same(6), ACCENT_DIM);
+        } else if resp.hovered() {
+            p.rect_filled(rect, CornerRadius::same(6), HOVER);
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        p.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            key,
+            mono(12.5),
+            if active { ACCENT } else { TEXT },
+        );
+        return resp;
+    }
     let lg = ui
         .painter()
         .layout_no_wrap(label.to_string(), body(12.5), TEXT);

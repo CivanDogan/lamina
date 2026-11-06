@@ -22,16 +22,18 @@ pub enum Tool {
     Zone,
     Keepout,
     Outline,
+    Measure,
 }
 
 impl Tool {
-    pub const ALL: [(Tool, &'static str, &'static str); 6] = [
+    pub const ALL: [(Tool, &'static str, &'static str); 7] = [
         (Tool::Select, "Select", "S"),
         (Tool::Route, "Route", "X"),
         (Tool::Via, "Via", "V"),
         (Tool::Zone, "Pour", "Z"),
         (Tool::Keepout, "Keep-out", "K"),
         (Tool::Outline, "Outline", "O"),
+        (Tool::Measure, "Measure", "D"),
     ];
 
     fn hint(self) -> &'static str {
@@ -49,6 +51,9 @@ impl Tool {
             Tool::Keepout => "Click corners, double-click or Enter to close · or drag a rectangle",
             Tool::Outline => {
                 "Click corners, double-click or Enter to close · or drag a rectangle · replaces the board outline"
+            }
+            Tool::Measure => {
+                "Click two points to measure · snaps to pad and via centres, else the grid · click again to start over"
             }
         }
     }
@@ -493,6 +498,7 @@ impl App {
                 }
             }
             Tool::Zone | Tool::Keepout | Tool::Outline => self.poly_input(resp, p, ps, origin),
+            Tool::Measure => self.measure_input(resp, p),
         }
     }
 
@@ -719,6 +725,11 @@ impl App {
                 self.undo();
             } else if k(Key::Y) || (k(Key::Z) && shift) {
                 self.redo();
+            } else if k(Key::F) {
+                self.find = Some(crate::actions::Find {
+                    just_opened: true,
+                    ..Default::default()
+                });
             } else if k(Key::A) {
                 if let Some(l) = &self.loaded {
                     self.sel = l
@@ -733,8 +744,16 @@ impl App {
             }
             return;
         }
+        if k(Key::F1) {
+            self.help = !self.help;
+        }
+        if self.help || self.find.is_some() {
+            return;
+        }
         if k(Key::Escape) {
-            if self.placing.take().is_some()
+            if self.measure.a.is_some() {
+                self.measure = Default::default();
+            } else if self.placing.take().is_some()
                 || self.route.take().is_some()
                 || !std::mem::take(&mut self.poly).is_empty()
                 || !matches!(
@@ -755,6 +774,7 @@ impl App {
             (Tool::Zone, Key::Z),
             (Tool::Keepout, Key::K),
             (Tool::Outline, Key::O),
+            (Tool::Measure, Key::D),
         ] {
             if k(key) {
                 self.set_tool(tool);
@@ -1332,10 +1352,14 @@ impl App {
             .inner_margin(egui::Margin::symmetric(4, 4))
             .show(&mut b, |ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
+                // Narrow canvases (several boards open) get the compact bar.
+                let compact = canvas.width() < 900.0;
+                let tiny = canvas.width() < 560.0;
                 ui.horizontal(|ui| {
                     for (t, label, key) in Tool::ALL {
-                        if widgets::tool_button(ui, label, key, self.tool == t)
-                            .on_hover_text(t.hint())
+                        let shown = if compact { "" } else { label };
+                        if widgets::tool_button(ui, shown, key, self.tool == t)
+                            .on_hover_text(format!("{label} ({key}) · {}", t.hint()))
                             .clicked()
                         {
                             self.set_tool(t);
@@ -1360,6 +1384,11 @@ impl App {
                         self.grid_i = (self.grid_i + 1) % edits::GRIDS.len();
                     }
                     widgets::vdivider(ui);
+                    self.board_menu(ui);
+                    if tiny {
+                        return;
+                    }
+                    widgets::vdivider(ui);
                     let (undo, redo, busy) = self
                         .editor
                         .as_ref()
@@ -1381,7 +1410,7 @@ impl App {
                     if r.clicked() {
                         self.redo();
                     }
-                    if busy > 0 {
+                    if busy > 0 || !self.bg.is_empty() {
                         ui.add_space(6.0);
                         ui.add(egui::Spinner::new().size(12.0).color(TEXT_3));
                     }

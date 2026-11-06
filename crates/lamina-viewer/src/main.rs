@@ -1,6 +1,7 @@
 // No console window behind the viewer in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod actions;
 mod editor;
 mod edits;
 mod live;
@@ -135,6 +136,11 @@ pub(crate) struct App {
     pub(crate) focused: bool,
     /// Asked for from the empty state; the shell carries it out.
     pub(crate) request: Option<OpenRequest>,
+    /// Exports and other background jobs whose result becomes a toast.
+    bg: Vec<std::sync::mpsc::Receiver<actions::BgDone>>,
+    find: Option<actions::Find>,
+    help: bool,
+    measure: actions::Measure,
     /// View and canvas size of the last automatic fit; while the view is
     /// untouched, a resized canvas is fitted again.
     fit_2d_at: Option<([f64; 2], f64, Vec2)>,
@@ -206,6 +212,10 @@ impl App {
             open_path: String::new(),
             focused: true,
             request: None,
+            bg: Vec::new(),
+            find: None,
+            help: false,
+            measure: actions::Measure::default(),
             fit_2d_at: None,
             fit_3d_at: None,
         };
@@ -242,6 +252,7 @@ impl App {
     }
 
     fn poll(&mut self) {
+        self.poll_bg();
         while let Some(r) = self.editor.as_mut().and_then(|e| e.poll()) {
             if let Some(s) = self.settling.as_mut() {
                 s.replied = true;
@@ -651,24 +662,10 @@ impl App {
     /// Returns true when the close button was clicked.
     fn pane_header(&mut self, ui: &mut egui::Ui, closable: bool) -> bool {
         let mut close = false;
-        ui.horizontal_centered(|ui| {
-            ui.add_space(10.0);
-            let (dot, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-            ui.painter().circle_filled(dot.center(), 3.5, self.health());
-            ui.label(
-                egui::RichText::new(self.tab_name())
-                    .font(semibold(13.0))
-                    .color(TEXT),
-            );
-            if let Some(root) = &self.root {
-                ui.label(
-                    egui::RichText::new(short_path(root))
-                        .font(body(11.5))
-                        .color(TEXT_3),
-                )
-                .on_hover_text(root.display().to_string());
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        // Right-hand controls first, so the name and path get what is left
+        // and are cut short instead of running under them.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            {
                 ui.add_space(8.0);
                 if closable
                     && ui
@@ -690,6 +687,30 @@ impl App {
                         self.mode = if sel == 0 { Mode::TwoD } else { Mode::ThreeD };
                         self.dirty = true;
                     }
+                }
+            }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add_space(10.0);
+                let (dot, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+                ui.painter().circle_filled(dot.center(), 3.5, self.health());
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(self.tab_name())
+                            .font(semibold(13.0))
+                            .color(TEXT),
+                    )
+                    .truncate(),
+                );
+                if let Some(root) = &self.root {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(root.display().to_string())
+                                .font(body(11.5))
+                                .color(TEXT_3),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(root.display().to_string());
                 }
             });
         });
@@ -1335,6 +1356,7 @@ impl App {
             };
             self.overlays(&painter, &xf);
             self.edit_overlays(&painter, &xf);
+            self.measure_overlay(&painter, &xf);
             widgets::hint(&painter, rect, self.tool_hint());
             self.toolbar(ui, rect);
             if let Some((msg, ok, t)) = &self.toast {
@@ -1462,10 +1484,13 @@ fn part_rows(d: &ProjectData, refdes: &str, rows: &mut Vec<(&str, String)>) {
     }
 }
 
+/// The end of a long path; counts characters, so non-ASCII folder names
+/// (`Masaüstü`) are never cut inside a character.
 fn short_path(p: &Path) -> String {
     let s = p.display().to_string();
-    if s.len() > 48 {
-        format!("…{}", &s[s.len() - 46..])
+    let n = s.chars().count();
+    if n > 48 {
+        format!("…{}", s.chars().skip(n - 46).collect::<String>())
     } else {
         s
     }
@@ -1917,8 +1942,12 @@ impl eframe::App for Shell {
             let gap = if n > 1 { 2.0 } else { 0.0 };
             let w = (area.width() - gap * (n as f32 - 1.0)) / n as f32;
             let header = 34.0;
-            let (pressed, press_at) =
-                ctx.input(|i| (i.pointer.any_pressed(), i.pointer.press_origin()));
+            let (pressed, press_at) = ctx.input(|i| {
+                (
+                    i.pointer.any_pressed(),
+                    i.pointer.interact_pos().or(i.pointer.latest_pos()),
+                )
+            });
             for (i, b) in self.boards.iter_mut().enumerate() {
                 let x = area.left() + i as f32 * (w + gap);
                 let pane =
@@ -1945,6 +1974,8 @@ impl eframe::App for Shell {
                         if b.loaded.is_some() {
                             if let Some(rs) = &rs {
                                 b.canvas(ui, rs);
+                                let ppp = ui.ctx().pixels_per_point();
+                                b.canvas_panels(ui, body_r, body_r.size() * ppp);
                             }
                         } else {
                             b.empty_state(ui);
@@ -2030,7 +2061,8 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("Lamina")
             .with_inner_size([1480.0, 920.0])
-            .with_min_inner_size([760.0, 480.0]),
+            .with_min_inner_size([760.0, 480.0])
+            .with_maximized(true),
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
@@ -2039,4 +2071,16 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| Ok(Box::new(Shell::new(cc, roots, three_d)))),
     )
+}
+
+#[cfg(test)]
+mod path_tests {
+    #[test]
+    fn short_path_keeps_whole_characters() {
+        let p = std::path::PathBuf::from(format!("C:/Users/oğuz/Masaüstü/{}", "ü".repeat(60)));
+        let s = super::short_path(&p);
+        assert_eq!(s.chars().count(), 47);
+        assert!(s.starts_with('…'));
+        assert_eq!(super::short_path(std::path::Path::new("C:/a")), "C:/a");
+    }
 }
