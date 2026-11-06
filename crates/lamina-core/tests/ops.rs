@@ -52,7 +52,7 @@ fn outline_and_status() {
     let s = p.status();
     let o = s.outline.unwrap();
     assert!((o.width() - 50.0).abs() < 1e-9);
-    // Reopen from disk.
+    // Open the project from disk again.
     let root = p.root().to_path_buf();
     drop(p);
     let p2 = Project::open(&root).unwrap();
@@ -96,7 +96,7 @@ fn apply_and_report_vs_strict() {
         strict: false,
     })
     .unwrap();
-    // Same pad into a second net: reported, applied.
+    // Put the same pad in a second net. The change is reported and applied.
     let r = p
         .connect(Connect {
             net: "B".into(),
@@ -107,7 +107,7 @@ fn apply_and_report_vs_strict() {
         .unwrap();
     assert_eq!(r.new_violations[0].rule, "pad_in_two_nets");
     assert!(p.data.nets.nets.contains_key("B"));
-    // Strict refuses and leaves the project unchanged.
+    // With strict, the change is refused and the project does not change.
     let before = p.data.clone();
     let e = p.connect(Connect {
         net: "C".into(),
@@ -182,7 +182,7 @@ fn stackup_refuses_stranding_copper() {
 #[test]
 fn lock_blocks_second_open_only_for_live_other_process() {
     let (_t, p) = new_project();
-    // Same process may reopen (pid matches).
+    // The same process can open the project again (the pid is the same).
     let again = Project::open(p.root());
     assert!(again.is_ok());
 }
@@ -223,7 +223,7 @@ fn import_from_fixtures() {
     let m = fp.model.as_ref().unwrap();
     assert!(p.root().join("cache/models").join(&m.file).is_file());
     assert!(p.root().join("cache/parts/C6186.json").is_file());
-    // Second import reuses the cached footprint and adds another part.
+    // The second import uses the cached footprint again and adds one more part.
     let r = p
         .import_lcsc(ImportLcsc {
             lcsc: "C6186".into(),
@@ -262,7 +262,7 @@ fn shared_editor_and_engine_see_each_other() {
             strict: false,
         })
         .unwrap();
-    // The viewer opens the same folder while the engine holds the lock.
+    // The viewer opens the same folder when the engine has the lock.
     let root = t.path().join("b");
     let mut viewer = Project::open_shared(&root).unwrap();
     let mut d = viewer.data.clone();
@@ -270,7 +270,7 @@ fn shared_editor_and_engine_see_each_other() {
     let r = viewer.apply(d, "drag R1").unwrap();
     assert_eq!(r.changed, vec!["placement.json".to_string()]);
 
-    // The engine notices before its next change and keeps the viewer's edit.
+    // Before its next change, the engine finds the edit of the viewer and keeps it.
     assert!(engine.sync().unwrap());
     assert!(!engine.sync().unwrap());
     engine
@@ -297,7 +297,7 @@ fn kicad_footprint_import_and_board_round_trip() {
         footprints: fixtures.clone(),
         models: t.path().join("no-models"),
     }));
-    // Fetched "online" (from the fixture source), with a part.
+    // Downloaded "online" (from the fixture source), with a part.
     let r = p
         .import_kicad_footprint(ImportKicadFootprint {
             footprint: "Package_TO_SOT_SMD:SOT-23".into(),
@@ -324,7 +324,7 @@ fn kicad_footprint_import_and_board_round_trip() {
     );
     assert_eq!(p.data.footprints["SOT-23"].pads.len(), 3);
     assert_eq!(p.data.parts.parts["Q1"].value.as_deref(), Some("BSS138"));
-    // Not found locally and offline: a clear error.
+    // If it is not found locally and online is false, there is a clear error.
     let e = p
         .import_kicad_footprint(ImportKicadFootprint {
             footprint: "Nope:Missing".into(),
@@ -339,7 +339,7 @@ fn kicad_footprint_import_and_board_round_trip() {
         .unwrap_err()
         .to_string();
     assert!(e.contains("not found"), "{e}");
-    // A .kicad_mod path works too.
+    // A .kicad_mod path also works.
     let path = fixtures.join("Resistor_SMD.pretty/R_0603_1608Metric.kicad_mod");
     p.import_kicad_footprint(ImportKicadFootprint {
         footprint: path.to_string_lossy().to_string(),
@@ -405,7 +405,7 @@ fn kicad_footprint_import_and_board_round_trip() {
     assert!(out.path.ends_with("demo.kicad_pcb"), "{}", out.path);
     assert_eq!(out.parts, 2);
 
-    // Into a fresh project.
+    // Import into a new project.
     let dir2 = t.path().join("imported");
     let mut q = Project::create(&dir2, "x").unwrap();
     let r = q
@@ -494,7 +494,7 @@ fn layout_blocks_repeat_save_and_place() {
     .unwrap();
     assert!(a.status().groups.contains_key("ch2"));
 
-    // ch2 takes ch1's layout around R3, which is turned a quarter.
+    // ch2 gets the layout of ch1 around R3, which is turned a quarter.
     let r = a
         .repeat_layout(
             serde_json::from_value(serde_json::json!({"from": "ch1", "to": ["ch2"]})).unwrap(),
@@ -529,7 +529,7 @@ fn layout_blocks_repeat_save_and_place() {
             .any(|v| v.rule == "unrouted" && v.message.contains("MID2"))
     );
 
-    // Saved into the workspace library, then placed on another board.
+    // Save the layout in the workspace library, then place it on a different board.
     let saved = a
         .save_layout_block(
             serde_json::from_value(serde_json::json!({"from": "ch1", "name": "pair"})).unwrap(),
@@ -587,7 +587,7 @@ fn layout_blocks_repeat_save_and_place() {
             serde_json::from_value(serde_json::json!({"name": "nope", "to": ["x"]})).unwrap(),
         )
         .unwrap_err();
-    assert!(e.to_string().contains("saved layouts: pair"), "{e}");
+    assert!(e.to_string().contains("saved layouts are: pair"), "{e}");
 }
 
 #[test]
@@ -598,7 +598,8 @@ fn kicad_board_models_fall_back_and_resolve_project_paths() {
     let corpus = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../lamina-step/corpus/C25804.step");
     std::fs::copy(&corpus, kicad.join("models/body.step")).unwrap();
-    // A missing library model first, a hidden one, then one in the project.
+    // First a library model that is not there, then a hidden model, then a
+    // model in the project.
     let pcb = r#"(kicad_pcb (version 20240108) (generator "test")
   (layers (0 "F.Cu" signal) (31 "B.Cu" signal) (44 "Edge.Cuts" user))
   (gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts") (width 0.1))
@@ -637,7 +638,7 @@ fn kicad_board_models_fall_back_and_resolve_project_paths() {
     let m = fp.model.as_ref().expect("project model used");
     assert_eq!(m.file, "kicad/models/body.step");
     assert_eq!(m.offset, [0.0, 0.0, 1.0]);
-    // A relative path without a variable is read from the KiCad project too.
+    // A relative path that has no variable is also read from the KiCad project.
     let fp2 = &p.data.footprints[&p.data.parts.parts["J2"].footprint];
     assert!(fp2.model.is_some());
     // The mounting hole has no body and is not drawn as a box.

@@ -2,7 +2,7 @@
 
 use lamina_model::{Copper, FpLayer, Layer, Side};
 
-/// Our layer for a KiCad board layer name, if we keep it.
+/// The Lamina layer for a KiCad board layer name, if Lamina keeps that layer.
 pub fn layer_from_kicad(name: &str) -> Option<Layer> {
     let (side, kind) = match name {
         "F.Cu" => return Some(Layer::TOP),
@@ -47,11 +47,11 @@ pub fn layer_to_kicad(l: Layer) -> String {
     }
 }
 
-/// Where a KiCad layer of a footprint drawing ends up.
+/// The destination of a KiCad layer of a footprint drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FpLayerMap {
     Keep(FpLayer),
-    /// User drawings and other layers we do not keep.
+    /// User drawings and other layers that Lamina does not keep.
     Drop,
     /// A layer of the other side of the board.
     OtherSide,

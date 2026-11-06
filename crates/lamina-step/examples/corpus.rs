@@ -1,5 +1,5 @@
-//! Load every STEP file in a folder and compare its bounds with the OBJ of
-//! the same name: `cargo run --release -p lamina-step --example corpus -- <dir>`.
+//! Load each STEP file in a folder and compare its bounds with the OBJ file
+//! that has the same name: `cargo run --release -p lamina-step --example corpus -- <dir>`.
 
 use std::time::Instant;
 

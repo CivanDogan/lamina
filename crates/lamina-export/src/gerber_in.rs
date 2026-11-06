@@ -1,12 +1,12 @@
-//! General Gerber (RS-274X with X2 attributes) and Excellon readers, for
-//! fab outputs written by any CAD program.
+//! General readers for Gerber (RS-274X with X2 attributes) and Excellon files.
+//! They read the fab outputs of any CAD program.
 
 use std::collections::HashMap;
 
 use geo::{BooleanOps, ConvexHull, Coord, LineString, MultiPoint, MultiPolygon, Polygon};
 use lamina_model::{Edge, Point, arc_points};
 
-/// Arc and circle flattening tolerance in mm.
+/// The tolerance in mm to flatten arcs and circles.
 const TOL: f64 = 0.005;
 
 /// One Gerber file read into geometry.
@@ -14,9 +14,9 @@ const TOL: f64 = 0.005;
 pub struct GerberImage {
     /// Final dark image in mm, Y up.
     pub image: MultiPolygon<f64>,
-    /// Centre lines of every draw, for reading board outlines.
+    /// The centre lines of all draws, to read board outlines.
     pub edges: Vec<Edge>,
-    /// `%TF.FileFunction` value, e.g. `Copper,L1,Top`.
+    /// The `%TF.FileFunction` value, for example `Copper,L1,Top`.
     pub function: Option<String>,
     pub notes: Vec<String>,
 }
@@ -24,7 +24,7 @@ pub struct GerberImage {
 #[derive(Clone, Debug)]
 enum Aperture {
     Circle(f64),
-    /// Any other shape as polygons at the origin, with exposure (dark/clear).
+    /// All other shapes, as polygons at the origin, each with its exposure (dark or clear).
     Shapes(Vec<(bool, Vec<Point>)>),
 }
 
@@ -48,7 +48,7 @@ impl Aperture {
         }
     }
 
-    /// Convex outline of the aperture (for rectangle-aperture draws).
+    /// The convex outline of the aperture (for draws with a rectangle aperture).
     fn outline(&self) -> Vec<Point> {
         match self {
             Aperture::Circle(d) => circle(Point::new(0.0, 0.0), d / 2.0),
@@ -87,7 +87,8 @@ fn poly_mp(pts: &[Point]) -> MultiPolygon<f64> {
     if pts.len() < 3 {
         return MultiPolygon::new(vec![]);
     }
-    // Normalise orientation and self-touching rings through a union with nothing.
+    // A union with an empty polygon makes the orientation normal and repairs rings that
+    // touch themselves.
     let p = MultiPolygon::new(vec![Polygon::new(ring(pts), vec![])]);
     p.union(&MultiPolygon::new(vec![]))
 }
@@ -134,7 +135,7 @@ fn regular(d: f64, n: u32, rot: f64) -> Vec<Point> {
 enum MacroItem {
     /// `$n=expr`
     Assign(usize, String),
-    /// Primitive code and its argument expressions.
+    /// The primitive code and the expressions of its arguments.
     Prim(u32, Vec<String>),
 }
 
@@ -143,7 +144,7 @@ fn eval(expr: &str, vars: &HashMap<usize, f64>) -> Result<f64, String> {
     let mut i = 0;
     let v = eval_sum(&toks, &mut i, vars)?;
     if i != toks.len() {
-        return Err(format!("bad macro expression `{expr}`"));
+        return Err(format!("The macro expression `{expr}` is not valid"));
     }
     Ok(v)
 }
@@ -184,7 +185,7 @@ fn eval_unary(t: &[char], i: &mut usize, vars: &HashMap<usize, f64>) -> Result<f
             *i += 1;
             let v = eval_sum(t, i, vars)?;
             if t.get(*i) != Some(&')') {
-                return Err("missing `)` in macro expression".into());
+                return Err("The macro expression has no closing `)`".into());
             }
             *i += 1;
             Ok(v)
@@ -199,7 +200,7 @@ fn eval_unary(t: &[char], i: &mut usize, vars: &HashMap<usize, f64>) -> Result<f
                 .iter()
                 .collect::<String>()
                 .parse()
-                .map_err(|_| "bad macro variable")?;
+                .map_err(|_| "The macro variable is not valid")?;
             Ok(vars.get(&n).copied().unwrap_or(0.0))
         }
         Some(_) => {
@@ -209,9 +210,9 @@ fn eval_unary(t: &[char], i: &mut usize, vars: &HashMap<usize, f64>) -> Result<f
             }
             let text: String = t[s..*i].iter().collect();
             text.parse()
-                .map_err(|_| format!("bad number `{text}` in macro expression"))
+                .map_err(|_| format!("The number `{text}` in the macro expression is not valid"))
         }
-        None => Err("macro expression ended early".into()),
+        None => Err("The macro expression is not complete".into()),
     }
 }
 
@@ -219,7 +220,8 @@ fn rot(p: Point, deg: f64) -> Point {
     p.rotated(deg)
 }
 
-/// Evaluate a macro with parameters to exposure-tagged polygons (file units).
+/// Calculate a macro with its parameters. The result is polygons, each with its
+/// exposure (file units).
 fn eval_macro(
     items: &[MacroItem],
     params: &[f64],
@@ -298,7 +300,7 @@ fn eval_macro(
                         out.push((exposure(g(0)), pts));
                     }
                     7 => {
-                        // Thermal: ring with four gaps along the axes.
+                        // Thermal: a ring with four gaps on the axes.
                         let c = Point::new(g(0), g(1));
                         let (od, id, gap, r) = (g(2), g(3), g(4), g(5));
                         let mut m = poly_mp(&circle(Point::new(0.0, 0.0), od / 2.0))
@@ -314,8 +316,10 @@ fn eval_macro(
                             out.push((true, pts));
                         }
                     }
-                    6 => notes.push("moiré aperture primitive skipped".into()),
-                    other => notes.push(format!("aperture macro primitive {other} skipped")),
+                    6 => notes.push("Lamina skipped a moiré aperture primitive".into()),
+                    other => notes.push(format!(
+                        "Lamina skipped the aperture macro primitive {other}"
+                    )),
                 }
             }
         }
@@ -325,7 +329,7 @@ fn eval_macro(
 
 // ---------------------------------------------------------------- the reader
 
-/// An open step-and-repeat block: counts, steps (mm) and its objects.
+/// An open step-and-repeat block: the counts, the steps (mm) and its objects.
 type StepRepeat = (u32, u32, f64, f64, Vec<(bool, MultiPolygon<f64>)>);
 
 #[derive(Clone, Copy, PartialEq)]
@@ -340,7 +344,7 @@ struct Reader {
     xd: u32,
     yd: u32,
     trailing: bool,
-    /// File units to mm.
+    /// The scale from file units to mm.
     scale: f64,
     apertures: HashMap<u32, Aperture>,
     macros: HashMap<String, Vec<MacroItem>>,
@@ -405,7 +409,7 @@ impl Reader {
     fn coord(&self, s: &str, dec: u32) -> Result<f64, String> {
         let v = if s.contains('.') {
             s.parse::<f64>()
-                .map_err(|_| format!("bad coordinate `{s}`"))?
+                .map_err(|_| format!("The coordinate `{s}` is not valid"))?
         } else {
             let (neg, digits) = match s.strip_prefix('-') {
                 Some(d) => (true, d),
@@ -419,7 +423,8 @@ impl Reader {
             };
             let n: f64 = digits
                 .parse::<i64>()
-                .map_err(|_| format!("bad coordinate `{s}`"))? as f64;
+                .map_err(|_| format!("The coordinate `{s}` is not valid"))?
+                as f64;
             let v = n / 10f64.powi(dec as i32);
             if neg { -v } else { v }
         };
@@ -454,7 +459,7 @@ impl Reader {
         }
     }
 
-    /// Points of a move from `a` to `b` (arcs flattened), and the edge it draws.
+    /// The points of a move from `a` to `b` (with flat arcs), and the edge that the move draws.
     fn path(&self, a: Point, b: Point, ij: (f64, f64), have_ij: bool) -> (Vec<Point>, Edge) {
         if self.interp == Interp::Linear || !have_ij {
             return (vec![a, b], Edge::Line(a, b));
@@ -463,7 +468,7 @@ impl Reader {
         let center = if self.multi {
             Point::new(a.x + ij.0, a.y + ij.1)
         } else {
-            // Single-quadrant: pick the signs giving a ≤ 90° arc.
+            // Single-quadrant: select the signs that give an arc of 90° or less.
             let mut best: Option<(f64, Point)> = None;
             for sx in [1.0, -1.0] {
                 for sy in [1.0, -1.0] {
@@ -536,15 +541,15 @@ impl Reader {
         };
         let first = first.replace(['\r', '\n'], "");
         if let Some(rest) = first.strip_prefix("FS") {
-            // FSLAX46Y46 (also FSTAX.., FSLIX.. incremental, rare)
+            // FSLAX46Y46 (also FSTAX.., and the rare incremental FSLIX..)
             self.trailing = rest.starts_with('T');
             if rest.chars().nth(1) == Some('I') {
                 self.out
                     .notes
-                    .push("incremental coordinates are not supported".into());
+                    .push("Lamina does not support incremental coordinates".into());
             }
-            let xi = rest.find('X').ok_or("bad FS")?;
-            let yi = rest.find('Y').ok_or("bad FS")?;
+            let xi = rest.find('X').ok_or("The FS command is not valid")?;
+            let yi = rest.find('Y').ok_or("The FS command is not valid")?;
             let xs: Vec<u32> = rest[xi + 1..yi]
                 .chars()
                 .filter_map(|c| c.to_digit(10))
@@ -576,7 +581,9 @@ impl Reader {
                 if let Some(assign) = w.strip_prefix('$') {
                     if let Some((n, e)) = assign.split_once('=') {
                         items.push(MacroItem::Assign(
-                            n.trim().parse().map_err(|_| "bad macro variable")?,
+                            n.trim()
+                                .parse()
+                                .map_err(|_| "The macro variable is not valid")?,
                             e.to_string(),
                         ));
                         continue;
@@ -588,13 +595,17 @@ impl Reader {
                     .next()
                     .unwrap_or("")
                     .parse()
-                    .map_err(|_| format!("bad macro primitive `{w}`"))?;
+                    .map_err(|_| format!("The macro primitive `{w}` is not valid"))?;
                 items.push(MacroItem::Prim(code, parts.map(str::to_string).collect()));
             }
             self.macros.insert(rest.to_string(), items);
         } else if let Some(rest) = first.strip_prefix("ADD") {
-            let split = rest.find(|c: char| !c.is_ascii_digit()).ok_or("bad AD")?;
-            let num: u32 = rest[..split].parse().map_err(|_| "bad aperture number")?;
+            let split = rest
+                .find(|c: char| !c.is_ascii_digit())
+                .ok_or("The AD command is not valid")?;
+            let num: u32 = rest[..split]
+                .parse()
+                .map_err(|_| "The aperture number is not valid")?;
             let def = &rest[split..];
             let (kind, args) = def.split_once(',').unwrap_or((def, ""));
             let vals: Vec<f64> = args
@@ -603,7 +614,7 @@ impl Reader {
                 .map(|s| {
                     s.trim()
                         .parse::<f64>()
-                        .map_err(|_| format!("bad aperture value `{s}`"))
+                        .map_err(|_| format!("The aperture value `{s}` is not valid"))
                 })
                 .collect::<Result<_, _>>()?;
             let s = self.scale;
@@ -625,7 +636,7 @@ impl Reader {
                     let items = self
                         .macros
                         .get(name)
-                        .ok_or_else(|| format!("aperture macro `{name}` is not defined"))?
+                        .ok_or_else(|| format!("The aperture macro `{name}` is not defined"))?
                         .clone();
                     let shapes = eval_macro(&items, &vals, &mut self.out.notes)?;
                     Aperture::Shapes(
@@ -645,7 +656,7 @@ impl Reader {
             };
             self.apertures.insert(num, ap);
         } else if let Some(rest) = first.strip_prefix("SR") {
-            // Close any open block, then open a new one when counts are given.
+            // Close the open block, if there is one. If the command gives counts, open a new block.
             if let Some((nx, ny, dx, dy, objs)) = self.sr.take() {
                 for j in 0..ny {
                     for i in 0..nx {
@@ -704,16 +715,16 @@ impl Reader {
         } else if first.starts_with("IPNEG") {
             self.out
                 .notes
-                .push("negative image polarity is not supported".into());
+                .push("Lamina does not support negative image polarity".into());
         } else if first.starts_with("AB") {
             self.out
                 .notes
-                .push("block apertures are not supported".into());
+                .push("Lamina does not support block apertures".into());
         } else if first.starts_with("LM") || first.starts_with("LR") || first.starts_with("LS") {
             if !matches!(first.as_str(), "LMN" | "LR0" | "LS1") {
                 self.out
                     .notes
-                    .push(format!("{first} (aperture transformation) is ignored"));
+                    .push(format!("Lamina ignores {first} (aperture transformation)"));
             }
         }
         Ok(())
@@ -727,14 +738,14 @@ impl Reader {
         if w.starts_with("G04") || (w.starts_with("G4") && !w.starts_with("G40")) {
             return Ok(());
         }
-        // Split into letter + value pairs.
+        // Split the word into pairs of a letter and a value.
         let mut fields: Vec<(char, String)> = Vec::new();
         let b: Vec<char> = w.chars().collect();
         let mut i = 0;
         while i < b.len() {
             let c = b[i];
             if !c.is_ascii_alphabetic() {
-                return Err(format!("unexpected `{c}` in `{w}`"));
+                return Err(format!("`{w}` contains the unexpected character `{c}`"));
             }
             i += 1;
             let s = i;
@@ -775,11 +786,13 @@ impl Reader {
                     91 => self
                         .out
                         .notes
-                        .push("incremental coordinates are not supported".into()),
+                        .push("Lamina does not support incremental coordinates".into()),
                     _ => {}
                 },
                 'D' => {
-                    let n: u32 = v.parse().map_err(|_| format!("bad D-code in `{w}`"))?;
+                    let n: u32 = v
+                        .parse()
+                        .map_err(|_| format!("The D-code in `{w}` is not valid"))?;
                     if n >= 10 {
                         self.current = Some(n);
                     } else {
@@ -848,7 +861,7 @@ pub fn read(text: &str) -> Result<GerberImage, String> {
             b'%' => {
                 let end = text[i + 1..]
                     .find('%')
-                    .ok_or("unterminated extended command")?
+                    .ok_or("An extended command has no closing `%`")?
                     + i
                     + 1;
                 r.extended(&text[i + 1..end])?;
@@ -876,7 +889,7 @@ pub fn read(text: &str) -> Result<GerberImage, String> {
 
 // ---------------------------------------------------------------- Excellon
 
-/// A drilled hole or slot: diameter and the two ends (equal for a round hole).
+/// A drilled hole or slot: the diameter and the two ends (the same point for a round hole).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrillHit {
     pub diameter: f64,
@@ -888,7 +901,7 @@ pub struct DrillHit {
 #[derive(Debug, Default)]
 pub struct DrillFile {
     pub hits: Vec<DrillHit>,
-    /// Plating from the file's own attributes, when it says.
+    /// The plating from the attributes of the file, if the file gives it.
     pub plated: Option<bool>,
     pub notes: Vec<String>,
 }
@@ -896,7 +909,7 @@ pub struct DrillFile {
 pub fn read_drill(text: &str) -> Result<DrillFile, String> {
     let mut out = DrillFile::default();
     let mut scale = 1.0;
-    let mut lz = true; // leading zeros present (trailing suppressed)
+    let mut lz = true; // the file keeps leading zeros and removes trailing zeros
     let (mut int_digits, mut dec_digits) = (3usize, 3usize);
     let mut decimal_seen_fmt = false;
     let mut tools: HashMap<u32, (f64, Option<bool>)> = HashMap::new();
@@ -915,7 +928,7 @@ pub fn read_drill(text: &str) -> Result<DrillFile, String> {
             None => (false, s.strip_prefix('+').unwrap_or(s)),
         };
         let v = if lz {
-            // Leading zeros kept: the first `intd` digits are the integer part.
+            // The file keeps leading zeros, so the first `intd` digits are the integer part.
             let total = intd + decd;
             let padded = format!("{d:0<total$}");
             padded.parse::<i64>().ok()? as f64 / 10f64.powi(decd as i32)
@@ -1123,7 +1136,9 @@ pub fn read_drill(text: &str) -> Result<DrillFile, String> {
                             b: p,
                             plated: *pl,
                         }),
-                        None => out.notes.push(format!("hit with undefined tool T{t}")),
+                        None => out
+                            .notes
+                            .push(format!("A hit uses the tool T{t}, which is not defined")),
                     }
                 }
             }
@@ -1153,8 +1168,9 @@ D10*\nX10000000Y10000000D03*\nD12*\nX20000000Y10000000D03*\nD11*\nX0Y0D02*\nX500
 X25000000Y20000000D02*\nG75*\nG03*\nX20000000Y25000000I-5000000J0D01*\nG01*\nG36*\nX30000000Y0D02*\nX32000000Y0D01*\nX32000000Y2000000D01*\nX30000000Y2000000D01*\nX30000000Y0D01*\nG37*\nM02*\n";
         let g = read(src).unwrap();
         assert_eq!(g.function.as_deref(), Some("Copper,L1,Top"));
-        // Rounded rect 2.5 x 1.5 with r 0.25, rect 2 x 1, region 2 x 2, a
-        // line and a separate quarter arc, both 0.5 wide with round ends.
+        // Items: a rounded rect 2.5 x 1.5 with r 0.25, a rect 2 x 1, a region 2 x 2,
+        // a line and a separate quarter arc. The line and the arc are 0.5 wide with
+        // round ends.
         let cap = std::f64::consts::PI * 0.25 * 0.25;
         let rr = 2.5 * 1.5 - (4.0 - std::f64::consts::PI) * 0.25 * 0.25;
         let line = 5.0 * 0.5 + cap;
@@ -1176,12 +1192,12 @@ X25000000Y20000000D02*\nG75*\nG03*\nX20000000Y25000000I-5000000J0D01*\nG01*\nG36
     fn inch_trailing_zeros_and_clear_polarity() {
         let src = "%FSTAX24Y24*%\n%MOIN*%\n%ADD10C,0.1*%\n%ADD11R,0.04X0.04*%\nD10*\nX01Y01D03*\n%LPC*%\nD11*\nX01Y01D03*\n%LPD*%\nM02*\n";
         let g = read(src).unwrap();
-        // Trailing zeros omitted: "01" with 2.4 is 01.0000 inch.
+        // The file removes trailing zeros, so "01" with format 2.4 is 01.0000 inch.
         let b = geo::BoundingRect::bounding_rect(&g.image).unwrap();
         assert!((b.center().x - 25.4).abs() < 1e-6, "{b:?}");
         let disc = std::f64::consts::PI * (1.27f64).powi(2);
         let hole = (0.04 * 25.4f64).powi(2);
-        // Circles are flattened to within 5 µm, which loses about 0.03 mm² here.
+        // Circles are flattened to a tolerance of 5 µm. Here, this removes about 0.03 mm².
         assert!(
             (area(&g.image) - (disc - hole)).abs() < 0.04,
             "{}",
@@ -1220,7 +1236,7 @@ G74*\nX30000Y0D02*\nG02*\nX20000Y-10000I10000J0D01*\nM02*\n";
         assert_eq!(d.hits[1].a, Point::new(60.0, 4.0));
         assert!((d.hits[0].diameter - 3.2).abs() < 1e-9);
 
-        // Trailing zeros kept: values are digits / 10^4 inch.
+        // The file keeps trailing zeros, so each value is digits / 10^4 inch.
         let inch =
             "M48\nINCH,TZ\nT01C0.0400\n%\nT01\nX010000Y005\nX020000Y010000G85X030000Y010000\nM30\n";
         let d = read_drill(inch).unwrap();

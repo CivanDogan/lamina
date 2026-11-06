@@ -1,5 +1,5 @@
-//! Wavefront OBJ, including EasyEDA's variant with materials inline
-//! (`newmtl` ... `endmtl` blocks inside the OBJ file).
+//! Wavefront OBJ, also the EasyEDA variant with inline materials
+//! (`newmtl` ... `endmtl` blocks in the OBJ file).
 
 use std::collections::HashMap;
 
@@ -13,7 +13,7 @@ fn srgb_to_linear(c: f32) -> f32 {
     }
 }
 
-/// Parse OBJ text. Faces with more than three vertices are fanned.
+/// Parse OBJ text. A face with more than three vertices becomes a fan of triangles.
 pub fn parse(text: &str) -> Result<Mesh, String> {
     let mut verts: Vec<[f32; 3]> = Vec::new();
     let mut materials: HashMap<String, [f32; 3]> = HashMap::new();
@@ -30,7 +30,7 @@ pub fn parse(text: &str) -> Result<Mesh, String> {
             "v" => {
                 let v: Vec<f32> = it.take(3).filter_map(|t| t.parse().ok()).collect();
                 if v.len() != 3 {
-                    return Err(format!("line {}: bad vertex", ln + 1));
+                    return Err(format!("line {}: the vertex is not valid", ln + 1));
                 }
                 verts.push([v[0], v[1], v[2]]);
             }
@@ -73,7 +73,7 @@ pub fn parse(text: &str) -> Result<Mesh, String> {
                     continue;
                 }
                 if idx.iter().any(|&i| i >= verts.len()) {
-                    return Err(format!("line {}: face index out of range", ln + 1));
+                    return Err(format!("line {}: the face index is out of range", ln + 1));
                 }
                 let key = current_mtl.clone().unwrap_or_default();
                 let pi = *part_for.entry(key.clone()).or_insert_with(|| {
@@ -91,7 +91,7 @@ pub fn parse(text: &str) -> Result<Mesh, String> {
         }
     }
     if parts.is_empty() {
-        return Err("OBJ has no faces".into());
+        return Err("the OBJ has no faces".into());
     }
     Ok(Mesh { parts }.compact())
 }

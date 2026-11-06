@@ -1,7 +1,7 @@
 //! A workspace groups several boards with shared libraries.
 //!
-//! `lamina.json` sits above the board folders. Each `lib` folder is a
-//! Jsonnet import path and may hold shared `footprints/` and `models/`.
+//! `lamina.json` is above the board folders. Each `lib` folder is a
+//! Jsonnet import path and can hold shared `footprints/` and `models/`.
 
 use std::path::{Path, PathBuf};
 
@@ -24,10 +24,10 @@ pub struct WorkspaceFile {
     /// Library folders, relative to the workspace root.
     #[serde(default = "default_lib")]
     pub lib: Vec<String>,
-    /// Folders holding KiCad `*.pretty` footprint libraries.
+    /// Folders that hold KiCad `*.pretty` footprint libraries.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kicad_footprints: Vec<String>,
-    /// Folders holding KiCad `*.3dshapes` model libraries.
+    /// Folders that hold KiCad `*.3dshapes` model libraries.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kicad_models: Vec<String>,
 }
@@ -47,9 +47,9 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    /// The workspace that contains `dir`, searching upwards.
+    /// The workspace that contains `dir`. The search goes up through the parent folders.
     pub fn find(dir: &Path) -> Option<Workspace> {
-        // Absolute first: a relative `.` has no parents to walk up to.
+        // Make the path absolute first: a relative `.` has no parents to go up to.
         let mut cur = Some(std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf()));
         for _ in 0..12 {
             let d = cur?;
@@ -71,7 +71,7 @@ impl Workspace {
         })?;
         if file.schema > SCHEMA {
             return Err(Error::Invalid(format!(
-                "{} uses schema {}, this build supports up to {SCHEMA}",
+                "{} uses schema {}. This build supports schema {SCHEMA} or lower. Update Lamina.",
                 path.display(),
                 file.schema
             )));
@@ -110,7 +110,7 @@ impl Workspace {
         crate::project::write_atomic(&path, text.as_bytes())
     }
 
-    /// Register a board folder (relative path kept forward-slashed).
+    /// Adds a board folder. The relative path keeps forward slashes.
     pub fn add_board(&mut self, dir: &Path) -> Result<()> {
         let abs = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
         let root = abs(&self.root);
@@ -118,7 +118,7 @@ impl Workspace {
             .strip_prefix(&root)
             .map_err(|_| {
                 Error::Invalid(format!(
-                    "{} is outside the workspace {}",
+                    "{} is outside the workspace {}. Use a board folder in the workspace.",
                     dir.display(),
                     self.root.display()
                 ))
@@ -149,7 +149,7 @@ impl Workspace {
         }
     }
 
-    /// KiCad footprint library roots named in `lamina.json`.
+    /// The roots of the KiCad footprint libraries in `lamina.json`.
     pub fn kicad_footprint_dirs(&self) -> Vec<PathBuf> {
         self.file
             .kicad_footprints
@@ -158,7 +158,7 @@ impl Workspace {
             .collect()
     }
 
-    /// KiCad 3D model library roots named in `lamina.json`.
+    /// The roots of the KiCad 3D model libraries in `lamina.json`.
     pub fn kicad_model_dirs(&self) -> Vec<PathBuf> {
         self.file
             .kicad_models
@@ -167,7 +167,7 @@ impl Workspace {
             .collect()
     }
 
-    /// Shared footprint folders, in search order.
+    /// Shared footprint folders, in the search order.
     pub fn footprint_dirs(&self) -> Vec<PathBuf> {
         self.lib_dirs()
             .into_iter()
@@ -176,7 +176,7 @@ impl Workspace {
             .collect()
     }
 
-    /// Shared model folders, in search order.
+    /// Shared model folders, in the search order.
     pub fn model_dirs(&self) -> Vec<PathBuf> {
         self.lib_dirs()
             .into_iter()
@@ -186,8 +186,8 @@ impl Workspace {
     }
 }
 
-/// Folders where a board's footprints may live: its own cache first, then
-/// the workspace libraries.
+/// The folders that can hold the footprints of a board: the cache of the board
+/// first, then the workspace libraries.
 pub fn footprint_dirs(board: &Path) -> Vec<PathBuf> {
     let mut out = vec![board.join(crate::project::FOOTPRINT_DIR)];
     if let Some(ws) = Workspace::find(board) {
@@ -196,9 +196,9 @@ pub fn footprint_dirs(board: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Folders holding saved block layouts: the board's own `layouts/` first,
-/// then `layouts/` in each workspace library. Missing folders included, so
-/// the first entry of a workspace library is where new layouts go.
+/// The folders that hold saved block layouts: the `layouts/` of the board first,
+/// then `layouts/` in each workspace library. The list includes folders that
+/// do not exist, so the first entry from a workspace library is where new layouts go.
 pub fn layout_dirs(board: &Path) -> Vec<PathBuf> {
     let mut out = vec![board.join(LAYOUT_DIR)];
     if let Some(ws) = Workspace::find(board) {
@@ -207,10 +207,10 @@ pub fn layout_dirs(board: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Folder name for saved block layouts.
+/// The folder name for saved block layouts.
 pub const LAYOUT_DIR: &str = "layouts";
 
-/// Resolve a model file for a board: its own cache first, then the
+/// Finds a model file for a board: the cache of the board first, then the
 /// workspace libraries.
 pub fn find_model(board: &Path, rel: &str) -> Option<PathBuf> {
     let own = board.join(crate::project::MODEL_DIR).join(rel);
@@ -259,7 +259,7 @@ mod tests {
         let board = root.join("boards/a");
         std::fs::create_dir_all(&board).unwrap();
         Workspace::create(&root, "demo").unwrap();
-        // `.` inside the board, written relative to the current directory.
+        // `.` in the board, written relative to the current directory.
         let cwd = std::env::current_dir().unwrap();
         let rel: PathBuf = cwd
             .components()

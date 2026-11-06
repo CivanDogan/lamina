@@ -10,7 +10,7 @@ use lamina_geom::Prim;
 use lamina_geom::fill::inflate;
 use lamina_model::*;
 
-/// One drawable shape in board millimetres.
+/// One shape to draw, in board millimetres.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Geom {
     /// Filled polygon with holes.
@@ -61,7 +61,7 @@ impl Geom {
     }
 }
 
-/// Drawing layers, back to front in `Scene2D::layers` order.
+/// The layers to draw, from back to front in the order of `Scene2D::layers`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SceneLayer {
     Copper(u8),
@@ -121,7 +121,7 @@ pub struct LayerDraw {
 #[derive(Debug, Clone)]
 pub struct Scene2D {
     pub layers: Vec<LayerDraw>,
-    /// Extent of the board, or of everything when there is no outline.
+    /// The extent of the board. If there is no outline, the extent of all items.
     pub bbox: Rect,
     pub copper_layers: u8,
     pub mask_color: String,
@@ -262,14 +262,14 @@ fn mp_geoms(m: &geo::MultiPolygon<f64>) -> Vec<Geom> {
         .collect()
 }
 
-/// Build the 2D scene. `analysis` supplies fills, ratsnest and DRC markers.
+/// Build the 2D scene. The analysis gives the fills, the ratsnest and the DRC markers.
 pub fn build_2d(d: &ProjectData, a: &Analysis) -> Scene2D {
     let layers_n = d.board.stackup.copper_layers;
     let rules = &d.board.rules;
     let mut layers: Vec<LayerDraw> = Vec::new();
     let g = &a.geometry;
 
-    // Copper: fills first so pads and tracks draw over them.
+    // Copper: add the fills first, so that pads and tracks are drawn over them.
     for f in &a.fills {
         if let Some(c) = f.layer.copper() {
             for p in &f.polygons {
@@ -295,7 +295,7 @@ pub fn build_2d(d: &ProjectData, a: &Analysis) -> Scene2D {
         push(&mut layers, SceneLayer::Drills, Geom::from_prim(&dr.prim));
     }
 
-    // Pads: mask and paste openings; footprint graphics and texts.
+    // Pads: mask and paste openings, footprint graphics and texts.
     for (refdes, pl) in &d.placement.placements {
         let Some(part) = d.parts.parts.get(refdes) else {
             continue;
@@ -346,7 +346,7 @@ pub fn build_2d(d: &ProjectData, a: &Analysis) -> Scene2D {
             if text.trim().is_empty() {
                 continue;
             }
-            // Keep text upright: undo up-side-down placements.
+            // Keep the text upright. If the placement turns it upside down, turn it 180 degrees.
             let mut rot = t.rotation + pl.rotation;
             let norm = rot.rem_euclid(360.0);
             if norm > 90.0 && norm <= 270.0 {
@@ -358,7 +358,7 @@ pub fn build_2d(d: &ProjectData, a: &Analysis) -> Scene2D {
             } else {
                 (t.size * 0.12).max(0.05)
             };
-            // Draw in board space; mirror for bottom by reflecting about the anchor.
+            // Draw in board space. For the bottom side, mirror the text about the anchor.
             let mirror = side == Side::Bottom;
             let tfb = |p: Point| {
                 if mirror {
@@ -542,7 +542,7 @@ pub struct Instance {
     pub refdes: String,
     /// Model file, or `None` for a placeholder box.
     pub model: Option<PathBuf>,
-    /// Column-major 4x4 model-to-board transform (mm).
+    /// The 4x4 transform from model to board, column-major (mm).
     pub transform: [f32; 16],
     /// Placeholder box (courtyard extents and height) in footprint coordinates.
     pub placeholder: Option<([f32; 3], [f32; 3])>,
@@ -628,7 +628,7 @@ fn flat(m: &M4) -> [f32; 16] {
     o
 }
 
-/// Transform from footprint coordinates (Z up from the board surface) to
+/// The transform from footprint coordinates (Z up from the board surface) to
 /// board coordinates for a placement.
 pub fn placement_matrix(pl: &Placement, thickness: f64) -> M4 {
     let base = mat_mul(
@@ -637,7 +637,7 @@ pub fn placement_matrix(pl: &Placement, thickness: f64) -> M4 {
     );
     match pl.side {
         Side::Top => mat_mul(&base, &translate(0.0, 0.0, thickness as f32)),
-        // Turn the part over (mirrors X, as footprints do) and hang it under the board.
+        // Turn the part over (this mirrors X, as footprints do) and put it below the board.
         Side::Bottom => mat_mul(&base, &rot_y(180.0)),
     }
 }
@@ -725,7 +725,7 @@ pub fn build_3d(d: &ProjectData, root: &Path) -> Scene3D {
     }
 }
 
-/// Analysis plus both scenes, the usual entry point.
+/// Build the analysis and the two scenes. This is the usual entry point.
 pub fn build(d: &ProjectData, root: &Path) -> (Analysis, Scene2D, Scene3D) {
     let a = lamina_drc::analyze(d);
     let s2 = build_2d(d, &a);

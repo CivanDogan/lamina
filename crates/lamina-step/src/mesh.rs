@@ -146,7 +146,7 @@ impl MeshPart {
         self.normals.extend_from_slice(&[n, n, n]);
     }
 
-    /// Triangle with per-vertex normals.
+    /// Add a triangle with per-vertex normals.
     pub fn push_smooth(&mut self, p: [[f32; 3]; 3], n: [[f32; 3]; 3]) {
         self.positions.extend_from_slice(&p);
         self.normals.extend_from_slice(&n);

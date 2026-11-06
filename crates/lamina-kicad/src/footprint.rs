@@ -1,6 +1,6 @@
-//! KiCad footprints: `.kicad_mod` files and the footprints embedded in a
-//! board. KiCad's Y axis points down and pad angles in a board are
-//! absolute; both are converted here.
+//! KiCad footprints: `.kicad_mod` files and the footprints in a board.
+//! In KiCad, the Y axis points down and the pad angles in a board are
+//! absolute. This module converts both.
 
 use std::collections::BTreeMap;
 
@@ -9,7 +9,7 @@ use lamina_model::*;
 use crate::layers::{FpLayerMap, fp_layer_from_kicad};
 use lamina_model::sexpr::{self, Sx};
 
-/// A footprint read from KiCad, with what a board instance adds.
+/// A footprint from KiCad, with the data that a board instance adds.
 #[derive(Debug, Clone)]
 pub struct Instance {
     pub footprint: Footprint,
@@ -26,27 +26,27 @@ pub struct Instance {
     pub exclude_from_bom: bool,
     /// Pad number to net name, from a board file.
     pub pad_nets: Vec<(String, String)>,
-    /// Shown 3D models in file order; the first that resolves is used.
+    /// The visible 3D models, in file order. The first model that resolves is used.
     pub models: Vec<KicadModel>,
     pub notes: Vec<String>,
 }
 
-/// The `(model ...)` entry, with KiCad's path variables unexpanded.
+/// The `(model ...)` entry. The KiCad path variables are not expanded.
 #[derive(Debug, Clone, PartialEq)]
 pub struct KicadModel {
     pub path: String,
     pub offset: [f64; 3],
-    /// Already in Lamina's sense (KiCad applies its values negated).
+    /// Already in the Lamina direction. KiCad applies these values with the opposite sign.
     pub rotation: [f64; 3],
     pub scale: [f64; 3],
 }
 
-/// Parse a `.kicad_mod` file. `origin` is recorded in the provenance.
+/// Parse a `.kicad_mod` file. The provenance records `origin`.
 pub fn parse_footprint(src: &str, library: &str, origin: &str) -> Result<Instance, String> {
     let node = sexpr::parse(src)?;
     if !(node.is("footprint") || node.is("module")) {
         return Err(format!(
-            "not a KiCad footprint (starts with `{}`)",
+            "the file is not a KiCad footprint (it starts with `{}`)",
             node.name().unwrap_or("?")
         ));
     }
@@ -82,8 +82,9 @@ struct Ctx {
 }
 
 impl Ctx {
-    /// Local KiCad coordinates to Lamina footprint-local (Y up). Back-side
-    /// footprints are stored flipped by KiCad, which cancels the Y flip.
+    /// Convert local KiCad coordinates to Lamina footprint-local coordinates
+    /// (Y up). KiCad keeps back-side footprints flipped, and this cancels the
+    /// Y flip.
     fn lp(&self, x: f64, y: f64) -> Point {
         if self.side == Side::Bottom {
             Point::new(r6(x), r6(y))
@@ -114,7 +115,7 @@ fn norm_deg(a: f64) -> f64 {
 
 /// Convert a `(footprint ...)` node from a library or a board.
 pub fn convert(node: &Sx, library_hint: &str, origin: &str) -> Result<Instance, String> {
-    let full = node.arg(0).ok_or("footprint has no name")?.to_string();
+    let full = node.arg(0).ok_or("the footprint has no name")?.to_string();
     let (library, name) = match full.split_once(':') {
         Some((l, n)) => (l.to_string(), n.to_string()),
         None => (library_hint.to_string(), full.clone()),
@@ -241,7 +242,7 @@ pub fn convert(node: &Sx, library_hint: &str, origin: &str) -> Result<Instance, 
                         .entry("pads without copper on this side".into())
                         .or_default() += 1
                 }
-                Err(e) => notes.push(format!("pad {} skipped: {e}", item.arg(0).unwrap_or("?"))),
+                Err(e) => notes.push(format!("skipped pad {}: {e}", item.arg(0).unwrap_or("?"))),
             },
             "model" => {
                 let hidden = item.child("hide").is_some_and(|h| h.arg(0) != Some("no"))
@@ -255,10 +256,10 @@ pub fn convert(node: &Sx, library_hint: &str, origin: &str) -> Result<Instance, 
         }
     }
     for (what, n) in skipped {
-        notes.push(format!("{n} {what} skipped"));
+        notes.push(format!("skipped {n} {what}"));
     }
     if fp.pads.is_empty() {
-        notes.push("footprint has no pads".into());
+        notes.push("the footprint has no pads".into());
     }
     Ok(Instance {
         footprint: fp,
@@ -340,7 +341,7 @@ fn is_filled(item: &Sx) -> bool {
     matches!(item.child_text("fill"), Some("yes") | Some("solid"))
 }
 
-/// Geometry of `fp_*` / `gr_*` drawing nodes, mapped through `xf`.
+/// The geometry of `fp_*` / `gr_*` drawing nodes, transformed with `xf`.
 pub(crate) fn shape_from(item: &Sx, xf: &dyn Fn(f64, f64) -> Point) -> Option<Shape> {
     let kind = item.name()?;
     let kind = kind
@@ -374,7 +375,7 @@ pub(crate) fn shape_from(item: &Sx, xf: &dyn Fn(f64, f64) -> Point) -> Option<Sh
             match pt("mid") {
                 Some(m) => arc_from_three(s, m, e)?,
                 None => {
-                    // KiCad 5: (fp_arc (start cx cy) (end x y) (angle a)); start is the centre.
+                    // KiCad 5: (fp_arc (start cx cy) (end x y) (angle a)). The start is the centre.
                     let a = item.child_num("angle")?;
                     Shape::Arc {
                         center: s,
@@ -427,7 +428,7 @@ pub(crate) fn points_from(pts: &Sx, xf: &dyn Fn(f64, f64) -> Point) -> Vec<Point
     out
 }
 
-/// Arc through three points as centre, start and signed sweep.
+/// The arc through three points, as the centre, the start and the signed sweep.
 pub(crate) fn arc_from_three(s: Point, m: Point, e: Point) -> Option<Shape> {
     let d = 2.0 * (s.x * (m.y - e.y) + m.x * (e.y - s.y) + e.x * (s.y - m.y));
     if d.abs() < 1e-12 {
@@ -457,15 +458,15 @@ fn pad_from(item: &Sx, ctx: &Ctx) -> Result<Option<(Pad, Option<String>)>, Strin
     let number = atoms.first().copied().unwrap_or("").to_string();
     let ptype = atoms.get(1).copied().unwrap_or("smd");
     let pshape = atoms.get(2).copied().unwrap_or("rect");
-    let at = item.child("at").ok_or("no position")?;
+    let at = item.child("at").ok_or("the pad has no position")?;
     let (x, y) = (
-        at.arg_num(0).ok_or("bad position")?,
-        at.arg_num(1).ok_or("bad position")?,
+        at.arg_num(0).ok_or("the pad position is not valid")?,
+        at.arg_num(1).ok_or("the pad position is not valid")?,
     );
     let abs_angle = at.arg_num(2).unwrap_or(0.0);
-    let (w, h) = item.xy("size").ok_or("no size")?;
+    let (w, h) = item.xy("size").ok_or("the pad has no size")?;
     if !(w > 0.0 && h > 0.0) {
-        return Err("size must be positive".into());
+        return Err("the pad size must be more than zero".into());
     }
     let layers: Vec<String> = item
         .child("layers")
@@ -552,7 +553,7 @@ fn pad_from(item: &Sx, ctx: &Ctx) -> Result<Option<(Pad, Option<String>)>, Strin
                 },
             }
         }
-        other => return Err(format!("unknown pad shape `{other}`")),
+        other => return Err(format!("the pad shape `{other}` is not known")),
     };
 
     let kind = match ptype {
@@ -563,9 +564,9 @@ fn pad_from(item: &Sx, ctx: &Ctx) -> Result<Option<(Pad, Option<String>)>, Strin
             PadKind::Smd
         }
         "thru_hole" | "np_thru_hole" => {
-            let d = item.child("drill").ok_or("through pad without drill")?;
+            let d = item.child("drill").ok_or("the through pad has no drill")?;
             let drill = if d.arg(0) == Some("oval") {
-                let dw = d.arg_num(1).ok_or("bad oval drill")?;
+                let dw = d.arg_num(1).ok_or("the oval drill is not valid")?;
                 let dh = d.arg_num(2).unwrap_or(dw);
                 Drill::Slot {
                     width: r6(dw),
@@ -573,7 +574,7 @@ fn pad_from(item: &Sx, ctx: &Ctx) -> Result<Option<(Pad, Option<String>)>, Strin
                 }
             } else {
                 Drill::Round {
-                    diameter: r6(d.arg_num(0).ok_or("bad drill")?),
+                    diameter: r6(d.arg_num(0).ok_or("the drill is not valid")?),
                 }
             };
             PadKind::Through {
@@ -581,7 +582,7 @@ fn pad_from(item: &Sx, ctx: &Ctx) -> Result<Option<(Pad, Option<String>)>, Strin
                 plated: ptype == "thru_hole",
             }
         }
-        other => return Err(format!("unknown pad type `{other}`")),
+        other => return Err(format!("the pad type `{other}` is not known")),
     };
     let mut pad = Pad::smd(number, ctx.lp(x, y), shape);
     pad.kind = kind;
@@ -595,7 +596,7 @@ fn pad_from(item: &Sx, ctx: &Ctx) -> Result<Option<(Pad, Option<String>)>, Strin
         .and_then(|d| d.child("offset"))
         .is_some()
     {
-        return Err("drill offset is not supported".into());
+        return Err("a drill offset is not supported".into());
     }
     // `(net 3 "GND")` up to KiCad 9, `(net "GND")` from KiCad 10.
     let net = item.child("net").and_then(|n| {
@@ -625,7 +626,8 @@ fn chamfered(w: f64, h: f64, rratio: f64, cratio: f64, corners: &[&str], ctx: &C
             // Two points, cut parallel to the diagonal.
             let a = (corner.0 - sx * c, corner.1);
             let b = (corner.0, corner.1 - sy * c);
-            // Order so the outline goes around: depends on the quadrant.
+            // Put the points in order so that the outline goes around. The
+            // order changes with the quadrant.
             if (sx < 0.0) == (sy < 0.0) {
                 pts.push(a);
                 pts.push(b);
@@ -718,7 +720,7 @@ mod tests {
         );
         assert!(p1.paste && p1.mask);
         assert!(fp.graphics.iter().any(|g| g.layer == FpLayer::Courtyard));
-        // Silk lines sit above and below the body: KiCad's -0.5225 becomes +0.5225.
+        // The silk lines are above and below the body. KiCad -0.5225 becomes +0.5225.
         assert!(
             fp.graphics
                 .iter()
@@ -795,7 +797,7 @@ mod tests {
 
     #[test]
     fn board_instance_front_and_back() {
-        // A rotated footprint on the front: pad angles are absolute in a board.
+        // A rotated footprint on the front. In a board, the pad angles are absolute.
         let front = r#"(footprint "Lib:R" (layer "F.Cu") (at 101 114.5 90)
             (property "Reference" "R6" (at 0 0 90) (layer "F.SilkS") (effects (font (size 1 1))))
             (property "Value" "100k" (at 0 1.43 90) (layer "F.Fab") (hide yes) (effects (font (size 1 1))))
@@ -816,7 +818,7 @@ mod tests {
                 ("2".to_string(), "FIRE1".to_string())
             ]
         );
-        // Value is hidden: only the reference text remains.
+        // The value is hidden. Only the reference text stays.
         assert_eq!(i.footprint.texts.len(), 1);
         let pl = Placement {
             x: i.at.x,
@@ -825,15 +827,16 @@ mod tests {
             side: i.side,
             locked: false,
         };
-        // Pad 1 at local (-0.825, 0) rotated 90° CCW lands below the centre (Y up).
+        // Pad 1 is at local (-0.825, 0). After a 90° CCW rotation, it is below
+        // the centre (Y up).
         let b = pl.transform(p1.at);
         assert!(
             (b.x - 101.0).abs() < 1e-9 && (b.y - (-114.5 - 0.825)).abs() < 1e-9,
             "{b:?}"
         );
 
-        // The same part flipped to the back: KiCad stores local Y negated and
-        // orientation + 180 relative to Lamina's convention.
+        // The same part, flipped to the back. Compared with Lamina, KiCad keeps
+        // the local Y negated and the orientation + 180.
         let back = r#"(footprint "Lib:R" (layer "B.Cu") (at 101 114.5 270)
             (property "Reference" "R6" (at 0 0 270) (layer "B.SilkS") (effects (font (size 1 1))))
             (pad "1" smd rect (at -0.825 0.3 270) (size 0.8 0.95) (layers "B.Cu" "B.Mask" "B.Paste"))
@@ -842,7 +845,8 @@ mod tests {
         assert_eq!(i.side, Side::Bottom);
         assert_eq!(i.rotation, 90.0);
         let p1 = i.footprint.pad("1").unwrap();
-        // Library-local (Y up) pad 1 is at (-0.825, -0.3): the stored y was flipped by KiCad.
+        // In library-local coordinates (Y up), pad 1 is at (-0.825, -0.3).
+        // KiCad flipped the stored y.
         assert_eq!(p1.at, Point::new(-0.825, 0.3));
         let pl = Placement {
             x: i.at.x,
@@ -851,7 +855,8 @@ mod tests {
             side: i.side,
             locked: false,
         };
-        // KiCad: abs = pos + Rk(270)·(-0.825, 0.3) in Y-down = (101 + 0.3·?, ...). Compute directly:
+        // KiCad: abs = pos + Rk(270)·(-0.825, 0.3) in Y-down coordinates.
+        // Calculate it directly:
         // Rk(o) = [[cos, sin], [-sin, cos]] on Y-down coordinates.
         let (c, s) = (270.0_f64.to_radians().cos(), 270.0_f64.to_radians().sin());
         let kx = 101.0 + c * -0.825 + s * 0.3;
@@ -874,7 +879,8 @@ mod tests {
                (primitives (gr_poly (pts (xy -1 -1) (xy 1 -1) (xy 1 1) (xy -1 1)) (width 0) (fill yes)))))"#;
         let i = convert(&sexpr::parse(src).unwrap(), "", "t").unwrap();
         let fp = &i.footprint;
-        // KiCad's arc from (1,0) through (0,-1) to (-1,0) is the upper half once Y is flipped: CCW 180°.
+        // The KiCad arc from (1,0) through (0,-1) to (-1,0) is the upper half
+        // after the Y flip: CCW 180°.
         match fp.graphics[0].shape {
             Shape::Arc {
                 center,

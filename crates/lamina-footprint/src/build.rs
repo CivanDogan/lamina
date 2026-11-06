@@ -5,29 +5,29 @@ use serde::{Deserialize, Serialize};
 
 use crate::ipc::{self, Density, Dim, Family, land};
 
-/// Body and lead dimensions of a package family. All mm.
+/// The body and lead dimensions of a package family. All values are in mm.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "family", rename_all = "snake_case")]
 pub enum PackageSpec {
-    /// Two-terminal rectangular chip (resistor, capacitor, LED, diode).
+    /// A two-terminal rectangular chip (resistor, capacitor, LED, diode).
     Chip {
-        /// Overall length, terminal to terminal.
+        /// The overall length, from terminal to terminal.
         length: Dim,
         width: Dim,
-        /// Terminal length.
+        /// The terminal length.
         terminal: Dim,
         height: f64,
-        /// Pin 1 is the cathode / polarity mark.
+        /// If true, pin 1 is the cathode / polarity mark.
         #[serde(default)]
         polarized: bool,
     },
-    /// Two rows of gull-wing or flat leads (SOIC, SSOP, TSSOP, SOT, SOD).
+    /// Two rows of gull-wing leads or flat leads (SOIC, SSOP, TSSOP, SOT, SOD).
     Dual {
         pins: u32,
         pitch: f64,
-        /// Lead tip to lead tip across the rows.
+        /// From lead tip to lead tip, across the rows.
         span: Dim,
-        /// Foot length.
+        /// The foot length.
         lead_length: Dim,
         lead_width: Dim,
         body_width: f64,
@@ -35,24 +35,24 @@ pub enum PackageSpec {
         height: f64,
         #[serde(default)]
         flat_leads: bool,
-        /// Exposed pad size, numbered pins + 1.
+        /// The exposed pad size. Its number is pins + 1.
         #[serde(default)]
         exposed_pad: Option<(f64, f64)>,
-        /// Explicit pad layout for SOT parts: per pin, (column -1|1, row offset in pitches).
+        /// An explicit pad layout for SOT parts. For each pin: (column -1|1, row offset in pitches).
         #[serde(default)]
         layout: Option<Vec<(i8, f64)>>,
-        /// Override lead width per pin (for tabs), pin number to width.
+        /// A different lead width for some pins (for tabs): pin number and width.
         #[serde(default)]
         wide_leads: Vec<(u32, Dim)>,
     },
     /// Leads on four sides (QFP) or terminals on four sides (QFN).
     Quad {
-        /// Pins on the left and right sides each.
+        /// The number of pins on each of the left and right sides.
         pins_vertical: u32,
-        /// Pins on the top and bottom sides each.
+        /// The number of pins on each of the top and bottom sides.
         pins_horizontal: u32,
         pitch: f64,
-        /// Tip-to-tip across the left/right leads (QFP) or body width (QFN).
+        /// From tip to tip across the left/right leads (QFP), or the body width (QFN).
         span_x: Dim,
         span_y: Dim,
         lead_length: Dim,
@@ -60,12 +60,12 @@ pub enum PackageSpec {
         body_x: f64,
         body_y: f64,
         height: f64,
-        /// true for QFN/DFN style bottom terminations.
+        /// True for bottom terminations in the QFN/DFN style.
         no_lead: bool,
         #[serde(default)]
         exposed_pad: Option<(f64, f64)>,
     },
-    /// Ball grid array, NSMD pads.
+    /// A ball grid array with NSMD pads.
     Bga {
         rows: u32,
         cols: u32,
@@ -75,7 +75,7 @@ pub enum PackageSpec {
         body_y: f64,
         height: f64,
     },
-    /// Through-hole pin header grid.
+    /// A through-hole pin header grid.
     PinHeader {
         rows: u32,
         cols: u32,
@@ -117,7 +117,7 @@ fn pad_shape(w: f64, h: f64) -> PadShape {
     }
 }
 
-/// Build a footprint from a package spec.
+/// Builds a footprint from a package spec.
 pub fn generate(
     id: &str,
     package: &str,
@@ -180,7 +180,7 @@ pub fn generate(
             lead_length.check("lead_length")?;
             lead_width.check("lead_width")?;
             if *pins < 2 {
-                return Err("dual package needs at least 2 pins".into());
+                return Err("A dual package must have a minimum of 2 pins.".into());
             }
             let fam = if *flat_leads {
                 Family::FlatLead
@@ -191,18 +191,24 @@ pub fn generate(
             };
             let goals = ipc::goals(fam, d);
             let base = land(*span, *lead_length, *lead_width, goals);
-            let max_w = pitch - 0.2; // keep at least 0.2 mm copper gap
+            let max_w = pitch - 0.2; // keep a copper gap of 0.2 mm or more
             let c = base.span() / 2.0;
             let positions: Vec<(i8, f64)> = match layout {
                 Some(l) => {
                     if l.len() != *pins as usize {
-                        return Err(format!("layout has {} entries for {pins} pins", l.len()));
+                        return Err(format!(
+                            "The layout has {} entries for {pins} pins. Give one entry for each pin.",
+                            l.len()
+                        ));
                     }
                     l.clone()
                 }
                 None => {
                     if pins % 2 != 0 {
-                        return Err("dual package without layout needs an even pin count".into());
+                        return Err(
+                            "A dual package with no layout must have an even number of pins."
+                                .into(),
+                        );
                     }
                     let half = pins / 2;
                     let top = (half as f64 - 1.0) / 2.0;
@@ -279,7 +285,7 @@ pub fn generate(
                 fp.pads.push(Pad::smd(num.to_string(), at, pad_shape(w, h)));
                 num += 1;
             };
-            // Left side, top to bottom.
+            // The left side, from top to bottom.
             for i in 0..*pins_vertical {
                 let y = ((nv - 1.0) / 2.0 - i as f64) * pitch;
                 push(
@@ -289,7 +295,7 @@ pub fn generate(
                     lx.x.min(wmax),
                 );
             }
-            // Bottom, left to right.
+            // The bottom, from left to right.
             for i in 0..*pins_horizontal {
                 let x = (-(nh - 1.0) / 2.0 + i as f64) * pitch;
                 push(
@@ -299,7 +305,7 @@ pub fn generate(
                     ly.pad_length(),
                 );
             }
-            // Right, bottom to top.
+            // The right side, from bottom to top.
             for i in 0..*pins_vertical {
                 let y = (-(nv - 1.0) / 2.0 + i as f64) * pitch;
                 push(
@@ -309,7 +315,7 @@ pub fn generate(
                     lx.x.min(wmax),
                 );
             }
-            // Top, right to left.
+            // The top, from right to left.
             for i in 0..*pins_horizontal {
                 let x = ((nh - 1.0) / 2.0 - i as f64) * pitch;
                 push(
@@ -343,7 +349,7 @@ pub fn generate(
             let pad = r2(ball * 0.8);
             let letters = bga_rows();
             if *rows as usize > letters.len() {
-                return Err("too many BGA rows".into());
+                return Err("There are too many BGA rows.".into());
             }
             for r in 0..*rows {
                 for c in 0..*cols {
@@ -370,13 +376,13 @@ pub fn generate(
             height,
         } => {
             if *rows == 0 || *cols == 0 {
-                return Err("pin header needs rows and cols".into());
+                return Err("A pin header must have one or more rows and one or more cols.".into());
             }
             if drill >= pad {
-                return Err("drill must be smaller than pad".into());
+                return Err("The drill must be smaller than the pad.".into());
             }
-            // Pins numbered along each row of `cols`, rows top to bottom
-            // (1x3 is one vertical column of 3 when cols == 1).
+            // Pins are numbered along each row of `cols`. Rows go from top to bottom
+            // (if cols == 1, 1x3 is one vertical column of 3).
             let mut n = 1;
             for r in 0..*rows {
                 for c in 0..*cols {
@@ -433,13 +439,13 @@ fn centered(w: f64, h: f64) -> Rect {
     }
 }
 
-/// Where to put the pin-1 mark.
+/// The position of the pin-1 mark.
 pub enum Pin1 {
-    /// Polarized two-terminal part: mark the side towards `dir`.
+    /// A polarized two-terminal part: mark the side in the direction `dir`.
     Side(Point),
-    /// Mark beyond this pad in direction `dir`.
+    /// Put the mark after this pad in the direction `dir`.
     Pad(Point, Point),
-    /// Mark at the body corner nearest this pad.
+    /// Put the mark at the body corner nearest to this pad.
     Corner(Point),
 }
 
@@ -451,7 +457,7 @@ fn snap_out(v: f64, step: f64) -> f64 {
     }
 }
 
-/// Add courtyard, fabrication outline, silkscreen and reference texts.
+/// Adds the courtyard, the fabrication outline, the silkscreen and the reference texts.
 pub fn decorate(fp: &mut Footprint, body: Rect, height: f64, pin1: Option<Pin1>, opt: &Options) {
     let pads = fp.pads_bbox().unwrap_or(body);
     let all = pads.union(&body);
@@ -476,7 +482,7 @@ pub fn decorate(fp: &mut Footprint, body: Rect, height: f64, pin1: Option<Pin1>,
         filled: false,
     });
 
-    // Fabrication outline with a chamfered pin-1 corner.
+    // The fabrication outline with a chamfered pin-1 corner.
     let ch = (body.width().min(body.height()) * 0.25).min(1.0);
     let fab = vec![
         Point::new(body.min.x + ch, body.max.y),
@@ -492,7 +498,7 @@ pub fn decorate(fp: &mut Footprint, body: Rect, height: f64, pin1: Option<Pin1>,
         filled: false,
     });
 
-    // Silkscreen: body outline just outside the body, clipped clear of pads.
+    // Silkscreen: a body outline just outside the body, clipped clear of the pads.
     let sw = opt.silk_width;
     let o = sw / 2.0 + 0.05;
     let sb = Rect {
@@ -533,7 +539,7 @@ pub fn decorate(fp: &mut Footprint, body: Rect, height: f64, pin1: Option<Pin1>,
     // Pin-1 mark.
     let mark = match pin1 {
         Some(Pin1::Side(dir)) => {
-            // A bar outside pad 1's outer end.
+            // A bar outside the outer end of pad 1.
             let p1 = fp.pads.first().map(|p| p.bbox());
             p1.map(|b| {
                 let x = if dir.x < 0.0 {
@@ -596,7 +602,7 @@ pub fn decorate(fp: &mut Footprint, body: Rect, height: f64, pin1: Option<Pin1>,
     fp.height = Some(height);
 }
 
-/// Parts of the axis-aligned segment a-b outside every rectangle.
+/// The parts of the axis-aligned segment a-b that are outside all rectangles.
 fn clip_segment(a: Point, b: Point, blocks: &[Rect]) -> Vec<(Point, Point)> {
     let horizontal = (a.y - b.y).abs() < 1e-9;
     let (lo, hi, fixed) = if horizontal {

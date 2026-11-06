@@ -1,4 +1,4 @@
-//! Lamina project operations. Each public operation maps to one MCP tool
+//! Lamina project operations. Each public operation is one MCP tool
 //! and one CLI subcommand.
 
 pub mod lock;

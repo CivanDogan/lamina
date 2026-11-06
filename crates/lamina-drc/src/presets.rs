@@ -1,7 +1,7 @@
 //! Fab capability presets.
 //!
-//! Values follow JLCPCB's published standard capabilities for HASL boards,
-//! with a small margin above the absolute minimums.
+//! The values come from the standard capabilities that JLCPCB publishes for
+//! HASL boards. Each value has a small margin above the absolute minimum.
 
 use lamina_model::Rules;
 
@@ -66,17 +66,17 @@ fn relaxed() -> Rules {
 pub const PRESETS: &[Preset] = &[
     Preset {
         name: "jlcpcb-2layer",
-        description: "JLCPCB 1-2 layer standard: 0.127 mm min track, 0.3 mm via drill",
+        description: "JLCPCB 1-2 layer standard: 0.127 mm minimum track, 0.3 mm via drill",
         rules: jlc_2,
     },
     Preset {
         name: "jlcpcb-4layer",
-        description: "JLCPCB 4+ layer standard: 0.09 mm min track, 0.2 mm via drill",
+        description: "JLCPCB 4+ layer standard: 0.09 mm minimum track, 0.2 mm via drill",
         rules: jlc_4,
     },
     Preset {
         name: "relaxed",
-        description: "Generous rules for any fab and hand soldering",
+        description: "Large margins for all fabs and for hand soldering",
         rules: relaxed,
     },
 ];

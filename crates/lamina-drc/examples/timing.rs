@@ -1,4 +1,4 @@
-//! Time the analysis steps on a project: `cargo run --release -p lamina-drc --example timing -- <dir>`.
+//! Measure the time of each analysis step on a project: `cargo run --release -p lamina-drc --example timing -- <dir>`.
 use std::time::Instant;
 
 fn main() {

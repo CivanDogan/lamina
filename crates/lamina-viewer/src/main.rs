@@ -1,4 +1,4 @@
-// No console window behind the viewer in release builds.
+// In release builds, the viewer has no console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod actions;
@@ -119,7 +119,7 @@ pub(crate) struct App {
     diagonal_first: bool,
     toast: Option<(String, bool, Instant)>,
     own_edit: Option<Instant>,
-    /// Groups that can take a group's layout: (group, load time, groups).
+    /// The groups that can take the layout of a group: (group, load time, groups).
     group_matches: Option<(String, Option<Instant>, Vec<String>)>,
     mm_per_px: f64,
     last_cursor: Option<Point>,
@@ -132,19 +132,20 @@ pub(crate) struct App {
     note_status: Option<(String, Instant)>,
     dirty: bool,
     open_path: String,
-    /// Takes keyboard shortcuts (the board last clicked when several are open).
+    /// This board gets the keyboard shortcuts. If several boards are open, it is
+    /// the board that the user clicked last.
     pub(crate) focused: bool,
-    /// Asked for from the empty state; the shell carries it out.
+    /// A request from the empty state. The shell does it.
     pub(crate) request: Option<OpenRequest>,
-    /// Canvas size in pixels at the last frame, for zooming from the panels.
+    /// The canvas size in pixels at the last frame. The panels use it to zoom.
     last_size_px: Vec2,
-    /// Exports and other background jobs whose result becomes a toast.
+    /// Exports and other background jobs. Their results show as toasts.
     bg: Vec<std::sync::mpsc::Receiver<actions::BgDone>>,
     find: Option<actions::Find>,
     help: bool,
     measure: actions::Measure,
-    /// View and canvas size of the last automatic fit; while the view is
-    /// untouched, a resized canvas is fitted again.
+    /// The view and the canvas size of the last automatic fit. If the view did
+    /// not change, a resized canvas gets a new fit.
     fit_2d_at: Option<([f64; 2], f64, Vec2)>,
     fit_3d_at: Option<(Camera, Vec2)>,
 }
@@ -231,7 +232,7 @@ impl App {
     fn open(&mut self, root: PathBuf, ctx: &egui::Context) {
         if !ProjectData::is_project(&root) {
             self.error = Some(format!(
-                "{} is not a Lamina project (no board.json)",
+                "{} is not a Lamina project. It has no board.json.",
                 root.display()
             ));
             return;
@@ -273,7 +274,7 @@ impl App {
                     if self.settling.as_ref().is_some_and(|s| s.replied) {
                         self.settling = None;
                     }
-                    // Flash only what someone else changed.
+                    // Flash only the changes that someone else made.
                     let own = self
                         .own_edit
                         .is_some_and(|t| t.elapsed() < Duration::from_millis(2500));
@@ -340,7 +341,7 @@ impl App {
         self.dirty = true;
     }
 
-    /// Item under a board point, top layer first.
+    /// The item at a board point. The top layer comes first.
     fn pick(&self, p: Point) -> Option<Pick> {
         let l = self.loaded.as_ref()?;
         let n = l.s2.copper_layers;
@@ -406,7 +407,7 @@ impl App {
                 }
             }
         }
-        // Pours come after parts: a click inside a courtyard means the part.
+        // Pours come after parts. A click in a courtyard selects the part.
         for f in &l.analysis.fills {
             let Some(c) = f.layer.copper() else { continue };
             if !self.is_visible(SceneLayer::Copper(c.index(n))) {
@@ -438,7 +439,7 @@ impl App {
                 }
             }
         }
-        // The outline before pours, whose edge usually coincides with it.
+        // Do the outline before the pours, because the edge of a pour is usually on it.
         if let Some(o) = &d.board.outline {
             if near_edge(o) {
                 return Some(Pick::Outline);
@@ -505,7 +506,7 @@ impl App {
                 ));
             }
             Err(e) => {
-                self.note_status = Some((format!("Could not save the note: {e}"), Instant::now()))
+                self.note_status = Some((format!("Cannot save the note: {e}"), Instant::now()))
             }
         }
     }
@@ -566,7 +567,7 @@ fn draw_prim(painter: &egui::Painter, xf: &Xf, prim: &Prim, color: Color32, glow
 // ---------------------------------------------------------------- app
 
 impl App {
-    /// Per-frame upkeep after drawing; true while something animates.
+    /// Upkeep for each frame after the drawing. Returns true while something animates.
     fn animating(&mut self) -> bool {
         let animating = self
             .flashes
@@ -603,7 +604,7 @@ impl App {
             .unwrap_or_else(|| "Open a board".into())
     }
 
-    /// Error, warning, clean, or not loaded.
+    /// The health colour: error, warning, clean, or not loaded.
     fn health(&self) -> Color32 {
         let Some(l) = &self.loaded else {
             return TEXT_3;
@@ -618,7 +619,7 @@ impl App {
         }
     }
 
-    /// DRC, routing and live chips, laid out right to left.
+    /// The DRC, routing and live chips, from right to left.
     fn chips(&self, ui: &mut egui::Ui) {
         let Some(l) = self.loaded.as_ref() else {
             return;
@@ -661,12 +662,12 @@ impl App {
         widgets::chip(ui, c, &text);
     }
 
-    /// Strip above a board's canvas: name and path, 2D/3D switch, close.
-    /// Returns true when the close button was clicked.
+    /// The strip above the canvas of a board: name and path, 2D/3D switch and
+    /// close button. Returns true if the user clicked the close button.
     fn pane_header(&mut self, ui: &mut egui::Ui, closable: bool) -> bool {
         let mut close = false;
-        // Right-hand controls first, so the name and path get what is left
-        // and are cut short instead of running under them.
+        // Add the controls on the right first. Then the name and path get the
+        // remaining space. They are cut short and do not go under the controls.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             {
                 ui.add_space(8.0);
@@ -743,7 +744,7 @@ impl App {
             if let Some(err) = &self.error {
                 ui.add_space(16.0);
                 ui.label(
-                    egui::RichText::new(format!("Reload failed: {err}"))
+                    egui::RichText::new(format!("Cannot reload: {err}"))
                         .font(body(12.0))
                         .color(ERROR),
                 );
@@ -867,7 +868,7 @@ impl App {
                         _ => {
                             ui.label(
                                 egui::RichText::new(
-                                    "Hover a pad, track or part to inspect it. Click to select and edit it.",
+                                    "Hover over a pad, track or part to see its data. Click it to select and edit it.",
                                 )
                                 .font(body(12.5))
                                 .color(TEXT_3),
@@ -895,7 +896,7 @@ impl App {
                 ui.add_space(6.0);
                 if violations.is_empty() {
                     ui.label(
-                        egui::RichText::new("No rule violations. Every check passes.")
+                        egui::RichText::new("There are no rule violations. All checks pass.")
                             .font(body(12.5))
                             .color(OK),
                     );
@@ -1034,7 +1035,7 @@ impl App {
                     } else {
                         rt.font(body(12.5))
                     };
-                    // Cut long values short instead of widening the panel.
+                    // Cut long values short. Do not make the panel wider.
                     ui.add(egui::Label::new(rt).truncate()).on_hover_text(v);
                     ui.end_row();
                 }
@@ -1059,7 +1060,7 @@ impl App {
         ui.label(egui::RichText::new(anchor).font(body(11.5)).color(TEXT_3));
         ui.add(
             egui::TextEdit::multiline(&mut self.note_text)
-                .hint_text("e.g. move C3 closer to U1 pin 1")
+                .hint_text("Example: move C3 nearer to U1 pin 1")
                 .desired_rows(3)
                 .desired_width(f32::INFINITY)
                 .font(body(13.0)),
@@ -1089,9 +1090,9 @@ impl App {
                     ui.add_space(6.0);
                     ui.label(
                         egui::RichText::new(
-                            "A Lamina project folder, or a KiCad, EasyEDA or Gerber file (imported on the fly). \
-                             The viewer redraws whenever the agent changes the board. Ctrl+O also opens a file, \
-                             and folders or files can be dropped on the window.",
+                            "A Lamina project folder, or a KiCad, EasyEDA or Gerber file (the viewer imports it). \
+                             The viewer draws the board again when the agent changes it. Ctrl+O also opens a file. \
+                             You can also drop folders or files on the window.",
                         )
                         .font(body(13.5))
                         .color(TEXT_2),
@@ -1165,7 +1166,7 @@ impl App {
             self.target = Some(t);
             self.dirty = true;
         }
-        // Window or pane resized while the view is as fitted: fit again.
+        // If the window or pane changes size and the view is as fitted, fit again.
         if let Some((c, p, s)) = self.fit_2d_at {
             if s != size_px && c == self.center && p == self.ppm {
                 self.fitted = false;
@@ -1303,7 +1304,8 @@ impl App {
                     let k = self.cam.distance * 0.0016;
                     let (sy, cy) = self.cam.yaw.to_radians().sin_cos();
                     let (sp, cp) = self.cam.pitch.to_radians().sin_cos();
-                    // Camera right and up vectors; drag moves the target in the view plane.
+                    // The right and up vectors of the camera. A drag moves the target in
+                    // the view plane.
                     let fwd = [-cp * cy, -cp * sy, -sp];
                     let right = {
                         let r = [fwd[1], -fwd[0], 0.0];
@@ -1409,7 +1411,7 @@ impl App {
 
     fn overlays(&self, painter: &egui::Painter, xf: &Xf) {
         let Some(l) = &self.loaded else { return };
-        // Net under the cursor, outlined in the accent colour.
+        // Outline the net under the cursor in the accent colour.
         let focus = self.hover.as_ref();
         if let Some(net) = focus.and_then(|p| p.net()) {
             for it in &l.analysis.geometry.copper {
@@ -1436,7 +1438,7 @@ impl App {
                 }
             }
         }
-        // What the agent just changed.
+        // Flash the items that the agent changed.
         for (r, t) in &self.flashes {
             let k = (t.elapsed().as_secs_f32() / 0.9).clamp(0.0, 1.0);
             let a = (1.0 - k).powi(2);
@@ -1510,8 +1512,8 @@ fn part_rows(d: &ProjectData, refdes: &str, rows: &mut Vec<(&str, String)>) {
     }
 }
 
-/// The end of a long path; counts characters, so non-ASCII folder names
-/// (`Masaüstü`) are never cut inside a character.
+/// The end of a long path. It counts characters, so it never cuts a non-ASCII
+/// folder name (`Masaüstü`) in a character.
 fn short_path(p: &Path) -> String {
     let s = p.display().to_string();
     let n = s.chars().count();
@@ -1530,7 +1532,7 @@ struct Shell {
     three_d: bool,
     add_path: String,
     add_error: Option<(String, Instant)>,
-    /// File dialogs and imports running in the background.
+    /// File dialogs and imports that run in the background.
     jobs: Vec<Job>,
     /// Project folders to open on the next frame.
     pending_open: Vec<PathBuf>,
@@ -1551,13 +1553,13 @@ fn remembered_boards() -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// Whether two paths name the same folder, however they were written.
+/// True if two paths name the same folder, also if they are written differently.
 fn same_path(a: &Path, b: &Path) -> bool {
     let abs = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
     abs(a) == abs(b)
 }
 
-/// A dropped folder, or a file inside a project folder, as a project root.
+/// The project root of a dropped folder, or of a file in a project folder.
 fn project_root(p: &Path) -> Option<PathBuf> {
     if ProjectData::is_project(p) {
         return Some(p.to_path_buf());
@@ -1596,8 +1598,8 @@ impl Shell {
             if ProjectData::is_project(&r) {
                 s.add(r, &cc.egui_ctx, rs);
             } else {
-                // A board file or a file in a project: imported or resolved
-                // in the background like anything opened later.
+                // A board file or a file in a project. Import or resolve it in
+                // the background, as with files that open later.
                 s.request(OpenRequest::Path(r), &cc.egui_ctx);
             }
         }
@@ -1619,7 +1621,7 @@ impl Shell {
             return;
         }
         let b = App::new(gpu_of(rs), Some(root), self.three_d, ctx);
-        // An empty placeholder pane gives way to the first real board.
+        // The first real board replaces an empty placeholder pane.
         if self.boards.len() == 1 && self.boards[0].root.is_none() {
             self.boards.clear();
         }
@@ -1639,7 +1641,7 @@ impl Shell {
         self.focus = self.focus.min(self.boards.len() - 1);
     }
 
-    /// Window title and the remembered board list follow what is open.
+    /// Make the window title and the list of remembered boards match the open boards.
     fn sync_title_and_memory(&mut self, ctx: &egui::Context) {
         let names: Vec<String> = self
             .boards
@@ -1751,7 +1753,7 @@ impl Shell {
                 },
             )
             .response
-            .on_hover_text("Open another board next to this one. Files and folders can also be dropped on the window.");
+            .on_hover_text("Open another board next to this one. You can also drop files and folders on the window.");
             if let Some(r) = req {
                 self.request(r, &ctx);
             }
@@ -1761,7 +1763,7 @@ impl Shell {
             }
             if let Some((e, t)) = &self.add_error {
                 if t.elapsed() < Duration::from_secs(8) {
-                    // Long import errors stay one line; the whole text is on hover.
+                    // A long import error stays on one line. Hover over it to see the full text.
                     let short: String = if e.chars().count() > 90 {
                         format!("{}…", e.chars().take(89).collect::<String>())
                     } else {
@@ -1788,16 +1790,16 @@ pub(crate) enum OpenRequest {
     Path(PathBuf),
 }
 
-/// A file dialog or an import running off the UI thread.
+/// A file dialog or an import that runs off the UI thread.
 struct Job {
     label: String,
-    /// The file being imported; `None` for a dialog.
+    /// The file to import. `None` for a dialog.
     path: Option<PathBuf>,
     rx: std::sync::mpsc::Receiver<JobDone>,
 }
 
 enum JobDone {
-    /// The dialog closed; `None` when cancelled.
+    /// The dialog closed. `None` if the user cancelled it.
     Picked(Option<PathBuf>),
     Opened(Result<PathBuf, String>),
 }
@@ -1851,7 +1853,7 @@ impl Shell {
             }),
             OpenRequest::Path(p) => {
                 if let Some(r) = project_root(&p) {
-                    // A project, or a file inside one: no import needed.
+                    // A project, or a file in a project. An import is not necessary.
                     if lamina_core::board_file_kind(&p).is_none()
                         || ProjectData::is_project(&p)
                         || p.file_name().is_some_and(|n| n == "board.json")
@@ -1879,7 +1881,7 @@ impl Shell {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let key = Some(p.clone());
-                self.spawn(format!("Importing {name}…"), key, ctx, move || {
+                self.spawn(format!("Import {name}…"), key, ctx, move || {
                     JobDone::Opened(
                         lamina_core::open_board_path(&p)
                             .map(|(dir, _)| dir)
@@ -1949,7 +1951,7 @@ impl eframe::App for Shell {
         for r in asked {
             self.request(r, &ctx);
         }
-        // A new pane layout changes every canvas size: fit them again.
+        // A new pane layout changes the size of each canvas. Fit them all again.
         if self.boards.len() != self.panes_seen {
             self.panes_seen = self.boards.len();
             for b in &mut self.boards {
@@ -2075,7 +2077,7 @@ impl eframe::App for Shell {
     }
 }
 
-/// A GUI-subsystem exe has no console; print into the one it was started from.
+/// A GUI-subsystem exe has no console. Print to the console that started it.
 fn attach_console() {
     #[cfg(windows)]
     {
@@ -2091,10 +2093,10 @@ fn attach_console() {
 
 const USAGE: &str = "Usage: lamina-viewer [--3d] [BOARD_DIR | BOARD_FILE]...
 
-Opens Lamina project folders, or KiCad, EasyEDA and Gerber files (imported
-on the fly), side by side in one window. Without arguments it reopens the
-boards that were open last time. More boards open
-with + in the top bar or by dropping a folder on the window.
+Opens Lamina project folders, or KiCad, EasyEDA and Gerber files, side by
+side in one window. The viewer imports board files when it opens them.
+Without arguments, it opens the boards that were open last time. To open
+more boards, click + in the top bar or drop a folder on the window.
 
   --3d  start in the 3D view";
 
@@ -2115,7 +2117,7 @@ fn main() -> eframe::Result<()> {
     let args: Vec<String> = args.into_iter().filter(|a| a != "--3d").collect();
     if let Some(bad) = args.iter().find(|a| a.starts_with('-')) {
         eprintln!(
-            "unknown option {bad}
+            "{bad} is not a known option.
 
 {USAGE}"
         );

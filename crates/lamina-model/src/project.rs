@@ -1,4 +1,4 @@
-//! Loading and saving a project folder.
+//! Load and save a project folder.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -52,7 +52,7 @@ pub const MODEL_DIR: &str = "cache/models";
 pub const PARTS_DIR: &str = "cache/parts";
 pub const RENDER_DIR: &str = "cache/render";
 
-/// Everything stored in a project folder.
+/// All the data in a project folder.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectData {
     pub board: BoardFile,
@@ -61,7 +61,7 @@ pub struct ProjectData {
     pub placement: PlacementFile,
     pub routing: RoutingFile,
     pub notes: NotesFile,
-    /// Footprints keyed by id, from `cache/footprints/`.
+    /// Footprints from `cache/footprints/`. The key is the id.
     pub footprints: BTreeMap<String, Footprint>,
 }
 
@@ -93,7 +93,7 @@ impl ProjectData {
         }
     }
 
-    /// Move everything on the board by (dx, dy): outline, holes, parts,
+    /// Moves all items on the board by (dx, dy): outline, holes, parts,
     /// tracks, vias, zones, keep-outs, texts and drawings.
     pub fn translate(&mut self, dx: f64, dy: f64) {
         let r = crate::json::round6;
@@ -139,7 +139,7 @@ impl ProjectData {
         }
     }
 
-    /// Whether `dir` looks like a Lamina project.
+    /// True if `dir` looks like a Lamina project.
     pub fn is_project(dir: &Path) -> bool {
         dir.join(FileKind::Board.file_name()).is_file()
     }
@@ -149,7 +149,7 @@ impl ProjectData {
             return Err(Error::NotAProject(dir.to_path_buf()));
         }
         let mut footprints = BTreeMap::new();
-        // The board's own cache wins over workspace libraries.
+        // The cache of the board wins over the workspace libraries.
         for fp_dir in crate::workspace::footprint_dirs(dir).into_iter().rev() {
             if !fp_dir.is_dir() {
                 continue;
@@ -179,7 +179,7 @@ impl ProjectData {
         Ok(data)
     }
 
-    /// Reload a single file in place (used by the viewer).
+    /// Reloads one file in place (the viewer uses this).
     pub fn reload(&mut self, dir: &Path, kind: FileKind) -> Result<()> {
         match kind {
             FileKind::Board => self.board = read_kind(dir, kind)?,
@@ -232,10 +232,10 @@ impl ProjectData {
         let fp = self
             .footprints
             .get(id)
-            .ok_or_else(|| Error::Invalid(format!("no footprint `{id}`")))?;
+            .ok_or_else(|| Error::Invalid(format!("The footprint `{id}` does not exist.")))?;
         if !valid_id(&fp.id) {
             return Err(Error::Invalid(format!(
-                "footprint id `{}` is not file-safe",
+                "The footprint id `{}` is not file-safe.",
                 fp.id
             )));
         }
@@ -264,7 +264,7 @@ pub fn footprint_path(dir: &Path, id: &str) -> PathBuf {
 fn check_schema(path: &Path, found: u32, supported: u32) -> Result<()> {
     if found > supported {
         return Err(Error::Invalid(format!(
-            "{} uses schema {found}, this build supports up to {supported}",
+            "{} uses schema {found}. This build supports schema {supported} or lower. Update Lamina.",
             path.display()
         )));
     }
@@ -294,7 +294,7 @@ fn read_kind_or_default<T: serde::de::DeserializeOwned + Default>(
     read_json(&path)
 }
 
-/// Windows can briefly refuse access while another process renames the file.
+/// Windows can refuse access for a short time when another process renames the file.
 fn read_retry(path: &Path) -> Result<String> {
     let mut last = None;
     for attempt in 0..20 {
@@ -312,12 +312,12 @@ fn read_retry(path: &Path) -> Result<String> {
     Err(Error::io(path, last.unwrap()))
 }
 
-/// Write to a temporary file in the same folder, then rename over the target,
-/// so readers never see a half-written file.
+/// Writes to a temporary file in the same folder, then renames it over the
+/// target. This way, readers never see a file that is only partly written.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
-    // Skip the write when nothing changed, so watchers stay quiet.
+    // If nothing changed, do not write. This keeps the watchers quiet.
     if fs::read(path).is_ok_and(|existing| existing == bytes) {
         return Ok(());
     }

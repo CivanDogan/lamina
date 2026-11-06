@@ -1,5 +1,5 @@
-//! Editing on the 2D canvas: tools, gestures, snapping, overlays, the
-//! toolbar and the properties panel.
+//! The editor of the 2D canvas: tools, gestures, snap, overlays, the toolbar
+//! and the properties panel.
 
 use std::time::Instant;
 
@@ -44,23 +44,23 @@ impl Tool {
             Tool::Route => {
                 "Click a pad to start · click to add corners · V via and switch layer · / bend · Backspace undo corner · Enter finish · Esc cancel"
             }
-            Tool::Via => "Click on copper of a net to drop a via there",
+            Tool::Via => "Click the copper of a net to put a via there",
             Tool::Zone => {
-                "Click corners, double-click or Enter to close · or drag a rectangle · net comes from the copper under the first corner"
+                "Click corners, double-click or Enter to close · or drag a rectangle · the copper under the first corner sets the net"
             }
             Tool::Keepout => "Click corners, double-click or Enter to close · or drag a rectangle",
             Tool::Outline => {
                 "Click corners, double-click or Enter to close · or drag a rectangle · replaces the board outline"
             }
             Tool::Measure => {
-                "Click two points to measure · snaps to pad and via centres, else the grid · click again to start over"
+                "Click two points to measure · snaps to pad and via centres, or to the grid · click again to restart"
             }
         }
     }
 }
 
 pub enum Drag {
-    /// Parts with the anchor part's origin, which lands on the grid.
+    /// Parts and the origin of the anchor part. The origin snaps to the grid.
     Parts(Vec<String>, Point),
     Via(String, Point),
     Segment(String, usize),
@@ -95,7 +95,7 @@ pub struct Placing {
     pub side: Side,
 }
 
-/// A committed move whose ghost stays until the reload shows it.
+/// A committed move. Its ghost stays until the reload shows the move.
 pub struct Settling {
     pub what: Drag,
     pub delta: Point,
@@ -172,7 +172,7 @@ impl App {
         self.toast = Some((msg.into(), ok, Instant::now()));
     }
 
-    /// Copper with a net under `p`, pads and vias before tracks. Snaps to
+    /// Copper with a net under `p`. Pads and vias come before tracks. Snaps to
     /// pad and via centres and to track ends.
     pub(crate) fn magnet(&self, p: Point, layer: Option<u8>, net: Option<&str>) -> Option<Magnet> {
         let l = self.loaded.as_ref()?;
@@ -224,8 +224,8 @@ impl App {
         best.map(|b| b.1)
     }
 
-    /// Whether a track piece would come closer than the clearance to copper
-    /// of another net.
+    /// True if a track piece is nearer than the clearance to the copper of
+    /// another net.
     fn conflicts(&self, a: Point, b: Point, layer: u8, net: &str, width: f64) -> bool {
         let Some(l) = &self.loaded else { return false };
         let d = &l.data;
@@ -274,7 +274,7 @@ impl App {
         })
     }
 
-    /// The single selected item whose corners can be dragged.
+    /// The single selected item whose corners the user can drag.
     fn editable_outline(&self) -> Option<VertexOf> {
         if self.sel.len() != 1 {
             return None;
@@ -331,7 +331,7 @@ impl App {
             min: Point::new(a.x.min(b.x), a.y.min(b.y)),
             max: Point::new(a.x.max(b.x), a.y.max(b.y)),
         };
-        // Left to right: fully inside. Right to left: touching.
+        // Left to right: the item must be fully inside. Right to left: it must touch the box.
         let enclose = b.x >= a.x;
         let inside =
             |p: Point| p.x >= r.min.x && p.x <= r.max.x && p.y >= r.min.y && p.y <= r.max.y;
@@ -394,7 +394,7 @@ impl App {
         self.dirty = true;
     }
 
-    /// Delta for a drag from `from` to `p` with grid snapping.
+    /// The delta for a drag from `from` to `p`, snapped to the grid.
     fn drag_delta(&self, what: &Drag, from: Point, p: Point) -> (Point, Point) {
         let g = self.grid();
         let raw = p.sub(from);
@@ -713,7 +713,7 @@ impl App {
     }
 
     fn keys(&mut self, ui: &egui::Ui, size_px: Vec2) {
-        // With several boards open, only the focused one takes shortcuts.
+        // If several boards are open, only the focused board gets shortcuts.
         if !self.focused || ui.ctx().egui_wants_keyboard_input() {
             return;
         }
@@ -1289,7 +1289,7 @@ impl App {
             }
         }
 
-        // Snapped crosshair for drawing tools.
+        // Snapped crosshair for the draw tools.
         if self.tool != Tool::Select || self.placing.is_some() {
             if let Some(p) = self.cursor_mm {
                 let s = xf.to_screen(snap_pt(p, self.grid()));
@@ -1411,7 +1411,7 @@ impl App {
                     let u = widgets::pill(ui, None, "Undo");
                     let u = match &undo {
                         Some(l) => u.on_hover_text(format!("Undo {l} · Ctrl+Z")),
-                        None => u.on_hover_text("Nothing to undo"),
+                        None => u.on_hover_text("There is nothing to undo"),
                     };
                     if u.clicked() {
                         self.undo();
@@ -1419,7 +1419,7 @@ impl App {
                     let r = widgets::pill(ui, None, "Redo");
                     let r = match &redo {
                         Some(l) => r.on_hover_text(format!("Redo {l} · Ctrl+Y")),
-                        None => r.on_hover_text("Nothing to redo"),
+                        None => r.on_hover_text("There is nothing to redo"),
                     };
                     if r.clicked() {
                         self.redo();
@@ -1435,7 +1435,7 @@ impl App {
 
 // ---------------------------------------------------------------- properties
 
-/// A number field that commits once: when a drag ends or typing finishes.
+/// A number field that commits once: when a drag ends or when the text entry ends.
 fn num_field(ui: &mut egui::Ui, key: &str, value: f64, speed: f64, suffix: &str) -> Option<f64> {
     let id = ui.scope_id().with(("num", key));
     let mut v = ui.data(|d| d.get_temp::<f64>(id)).unwrap_or(value);
@@ -1467,9 +1467,9 @@ fn val(ui: &mut egui::Ui, v: impl Into<String>) {
 }
 
 impl App {
-    /// Group actions for a selected part: select the whole group, take the
-    /// layout of another group with this part kept in place, or give this
-    /// group's layout to every group wired the same way.
+    /// Group actions for a selected part: select the full group, copy the
+    /// layout of another group and keep this part in its position, or copy the
+    /// layout of this group to all groups with the same connections.
     fn group_panel(&mut self, ui: &mut egui::Ui, d: &ProjectData, r: &str, g: &str) {
         let fresh =
             matches!(&self.group_matches, Some((k, t, _)) if k == g && *t == self.last_reload);
@@ -1511,13 +1511,13 @@ impl App {
                         ..Default::default()
                     };
                     lamina_core::reuse::repeat(d, &src, &tgt, None, &o)?;
-                    Ok(format!("layout of {from} copied to {n} group(s)"))
+                    Ok(format!("Copied the layout of {from} to {n} group(s)"))
                 });
             }
         });
         if matches.is_empty() {
             ui.label(
-                egui::RichText::new("No other group is wired like this one.")
+                egui::RichText::new("No other group has the same connections as this group.")
                     .font(body(12.0))
                     .color(TEXT_3),
             );
@@ -1526,7 +1526,7 @@ impl App {
         ui.horizontal(|ui| {
             kv(ui, "layout like");
             egui::ComboBox::from_id_salt(("layout-from", g))
-                .selected_text("choose a group")
+                .selected_text("select a group")
                 .show_ui(ui, |ui| {
                     for m in &matches {
                         if ui.selectable_label(false, m).clicked() {
@@ -1540,7 +1540,9 @@ impl App {
                                     ..Default::default()
                                 };
                                 lamina_core::reuse::repeat(d, &src, &[tgt], Some(&anchor), &o)?;
-                                Ok(format!("{to} laid out like {from}, around {anchor}"))
+                                Ok(format!(
+                                    "Copied the layout of {from} to {to}, around {anchor}"
+                                ))
                             });
                         }
                     }
@@ -1552,8 +1554,8 @@ impl App {
         let Some(l) = &self.loaded else { return };
         let d = l.data.clone();
         let n = d.board.stackup.copper_layers;
-        // Drop selections whose items are gone (deleted by us or the agent),
-        // but not while our own edit is still on its way to the files.
+        // Remove selections whose items are gone (deleted by the viewer or the
+        // agent). Do not do this while our own edit is not yet in the files.
         let settled = self.editor.as_ref().is_none_or(|e| e.busy == 0)
             && match (self.own_edit, self.last_reload) {
                 (Some(e), Some(r)) => r > e,
@@ -1679,7 +1681,7 @@ impl App {
                                 && (old.x, old.y, old.rotation, old.side)
                                     != (new.x, new.y, new.rotation, new.side)
                             {
-                                return Err(format!("{r2} is locked; unlock it first"));
+                                return Err(format!("{r2} is locked. Unlock it first."));
                             }
                         }
                         edits::set_placement(d, &r2, new)
@@ -1773,10 +1775,10 @@ impl App {
                             .tracks
                             .iter_mut()
                             .find(|t| t.id == id2)
-                            .ok_or("track is gone")?;
+                            .ok_or("The track was deleted")?;
                         if let Some(w) = width {
                             if w <= 0.0 {
-                                return Err("width must be positive".into());
+                                return Err("The width must be more than 0".into());
                             }
                             t.width = lamina_model::json::round6(w);
                         }
@@ -1848,11 +1850,11 @@ impl App {
                             .vias
                             .iter_mut()
                             .find(|v| v.id == id2)
-                            .ok_or("via is gone")?;
+                            .ok_or("The via was deleted")?;
                         let nd = dia.unwrap_or(v.diameter);
                         let ndr = drill.unwrap_or(v.drill);
                         if !(ndr > 0.0 && nd > ndr) {
-                            return Err("a via needs 0 < drill < diameter".into());
+                            return Err("A via must have 0 < drill < diameter".into());
                         }
                         v.diameter = lamina_model::json::round6(nd);
                         v.drill = lamina_model::json::round6(ndr);
@@ -1920,7 +1922,7 @@ impl App {
                 });
                 if nz != z {
                     if nz.layers.is_empty() {
-                        self.say("A pour needs at least one layer", false);
+                        self.say("A pour must have at least one layer", false);
                     } else {
                         let id2 = id.clone();
                         self.commit(move |d| {
@@ -1929,7 +1931,7 @@ impl App {
                                 .zones
                                 .iter_mut()
                                 .find(|z| z.id == id2)
-                                .ok_or("pour is gone")?;
+                                .ok_or("The pour was deleted")?;
                             *z = nz;
                             Ok(format!("Pour {id2} updated"))
                         });
@@ -1938,7 +1940,7 @@ impl App {
                 ui.add_space(8.0);
                 ui.label(
                     egui::RichText::new(
-                        "Drag the corner handles to reshape, or drag inside to move.",
+                        "Drag the corner handles to change the shape. Drag inside to move the pour.",
                     )
                     .font(body(12.0))
                     .color(TEXT_3),
@@ -1998,7 +2000,7 @@ impl App {
                             .keepouts
                             .iter_mut()
                             .find(|z| z.id == id2)
-                            .ok_or("keep-out is gone")?;
+                            .ok_or("The keep-out was deleted")?;
                         *k = nk;
                         Ok(format!("Keep-out {id2} updated"))
                     });
@@ -2051,7 +2053,7 @@ impl App {
                             .holes
                             .iter_mut()
                             .find(|h| h.id == id2)
-                            .ok_or("hole is gone")?;
+                            .ok_or("The hole was deleted")?;
                         h.at = to;
                         Ok(format!("Hole {id2} at {:.3}, {:.3} mm", to.x, to.y))
                     });
@@ -2093,7 +2095,7 @@ impl App {
                 ui.add_space(6.0);
                 ui.label(
                     egui::RichText::new(
-                        "Drag the corner handles to reshape. The Outline tool draws a new one.",
+                        "Drag the corner handles to change the shape. The Outline tool draws a new outline.",
                     )
                     .font(body(12.0))
                     .color(TEXT_3),
@@ -2128,7 +2130,7 @@ impl App {
             );
         });
         ui.label(
-            egui::RichText::new("Click one, then click the board to place it.")
+            egui::RichText::new("Click a part, then click the board to place it.")
                 .font(body(12.0))
                 .color(TEXT_3),
         );

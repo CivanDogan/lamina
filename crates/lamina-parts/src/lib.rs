@@ -1,4 +1,4 @@
-//! Part search and import from LCSC / JLCPCB / EasyEDA.
+//! Search for parts and import them from LCSC / JLCPCB / EasyEDA.
 
 pub mod board;
 pub mod easyeda;
@@ -29,7 +29,7 @@ mod tests {
         let fp = &im.footprint;
         assert_eq!(fp.id, "SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR");
         assert_eq!(fp.pads.len(), 4);
-        // Pins 1..3 on the right at x = +2.97; EasyEDA draws pin 1 at the bottom.
+        // Pins 1..3 are on the right at x = +2.97. EasyEDA draws pin 1 at the bottom.
         let p1 = fp.pad("1").unwrap();
         let p3 = fp.pad("3").unwrap();
         let tab = fp.pad("4").unwrap();

@@ -1,7 +1,7 @@
 //! IPC-7351B land pattern equations.
 //!
-//! Given component tolerances and solder fillet goals, compute the pad
-//! outer span Z, inner gap G and pad width X.
+//! From the component tolerances and the solder fillet goals, these equations
+//! calculate the outer span Z of the pads, the inner gap G and the pad width X.
 
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,7 @@ impl Dim {
         Dim { min, max }
     }
 
-    /// Nominal with symmetric tolerance.
+    /// A nominal value with a symmetric tolerance.
     pub fn nom(nom: f64, tol: f64) -> Dim {
         Dim::new(nom - tol, nom + tol)
     }
@@ -33,7 +33,10 @@ impl Dim {
     pub fn check(&self, what: &str) -> Result<(), String> {
         if !(self.min.is_finite() && self.max.is_finite() && self.min > 0.0 && self.max >= self.min)
         {
-            return Err(format!("{what}: need 0 < min <= max, got {:?}", self));
+            return Err(format!(
+                "{what}: the values must be 0 < min <= max, but they are {:?}",
+                self
+            ));
         }
         Ok(())
     }
@@ -77,7 +80,7 @@ impl Density {
     }
 }
 
-/// Solder fillet goals: toe, heel, side.
+/// The solder fillet goals: toe, heel, side.
 #[derive(Debug, Clone, Copy)]
 pub struct Goals {
     pub toe: f64,
@@ -85,20 +88,20 @@ pub struct Goals {
     pub side: f64,
 }
 
-/// Lead families with distinct fillet goals.
+/// Lead families with different fillet goals.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Family {
-    /// Rectangular chip, 0603 and larger.
+    /// A rectangular chip, 0603 and larger.
     Chip,
-    /// Rectangular chip smaller than 0603.
+    /// A rectangular chip smaller than 0603.
     SmallChip,
-    /// Gull-wing leads with pitch above 0.625 mm.
+    /// Gull-wing leads with a pitch of more than 0.625 mm.
     GullWing,
-    /// Gull-wing leads with pitch 0.625 mm or less.
+    /// Gull-wing leads with a pitch of 0.625 mm or less.
     FineGullWing,
     /// Bottom-only terminations (QFN, DFN, SON).
     NoLead,
-    /// Flat leads (SOD-123F, SOT-89 tab and similar).
+    /// Flat leads (SOD-123F, SOT-89 tab and other similar packages).
     FlatLead,
 }
 
@@ -126,14 +129,14 @@ pub fn goals(f: Family, d: Density) -> Goals {
 pub const FAB_TOL: f64 = 0.05;
 pub const PLACE_TOL: f64 = 0.025;
 
-/// Result of the land equations.
+/// The result of the land equations.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Land {
-    /// Outer edge to outer edge of the two pads.
+    /// From the outer edge to the outer edge of the two pads.
     pub z: f64,
-    /// Inner gap between the two pads.
+    /// The inner gap between the two pads.
     pub g: f64,
-    /// Pad width (perpendicular to the lead axis).
+    /// The pad width (perpendicular to the lead axis).
     pub x: f64,
 }
 
@@ -142,7 +145,7 @@ impl Land {
         (self.z - self.g) / 2.0
     }
 
-    /// Centre-to-centre distance between opposite pads.
+    /// The centre-to-centre distance between opposite pads.
     pub fn span(&self) -> f64 {
         (self.z + self.g) / 2.0
     }
@@ -158,9 +161,9 @@ fn round_down(v: f64, step: f64) -> f64 {
 
 /// IPC-7351B equations.
 ///
-/// * `l` overall terminal-to-terminal length
-/// * `t` terminal (foot) length
-/// * `w` terminal width
+/// * `l`: the overall terminal-to-terminal length
+/// * `t`: the terminal (foot) length
+/// * `w`: the terminal width
 pub fn land(l: Dim, t: Dim, w: Dim, goals: Goals) -> Land {
     let f2p2 = FAB_TOL * FAB_TOL + PLACE_TOL * PLACE_TOL;
     let s_min = l.min - 2.0 * t.max;
@@ -192,7 +195,7 @@ mod tests {
             Dim::nom(0.8, 0.15),
             goals(Family::Chip, Density::Nominal),
         );
-        // Widely used nominal land: 0.8 x 0.95 pads, 0.825 from centre.
+        // A nominal land that many designs use: 0.8 x 0.95 pads, 0.825 from the centre.
         assert!((l.z - 2.46).abs() <= 0.02, "{l:?}");
         assert!((l.g - 0.83).abs() <= 0.03, "{l:?}");
         assert!((l.x - 0.96).abs() <= 0.02, "{l:?}");

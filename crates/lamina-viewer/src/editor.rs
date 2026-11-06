@@ -1,8 +1,8 @@
-//! Applies viewer edits on a worker thread through the engine, with undo.
+//! Applies viewer edits through the engine on a worker thread, with undo.
 //!
-//! The project is opened without its lock so an agent can work on it at the
-//! same time. Before each edit the files are re-read if they changed on
-//! disk, and undo only restores files that nobody changed since.
+//! The viewer opens the project without its lock, so an agent can work on it
+//! at the same time. Before each edit, the viewer reads the files again if they
+//! changed on disk. Undo restores only the files that nobody changed after the edit.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -74,7 +74,7 @@ impl Editor {
         let _ = self.tx.send(Job::Redo);
     }
 
-    /// Next reply, keeping the undo labels current.
+    /// Get the next reply and update the undo labels.
     pub fn poll(&mut self) -> Option<Reply> {
         let r = self.rx.try_recv().ok()?;
         self.busy = self.busy.saturating_sub(1);
@@ -116,7 +116,7 @@ fn run(
     }
     let p = project.as_mut().unwrap();
     p.sync()
-        .map_err(|e| format!("could not read the project: {e}"))?;
+        .map_err(|e| format!("cannot read the project: {e}"))?;
     match job {
         Job::Edit(f) => {
             let before = p.data.clone();
@@ -135,9 +135,9 @@ fn run(
             Ok(describe(&label, &r))
         }
         Job::Undo => {
-            let s = undo.pop().ok_or("Nothing to undo")?;
+            let s = undo.pop().ok_or("There is nothing to undo")?;
             let target = restore(&p.data, &s.after, &s.before)
-                .map_err(|e| format!("Can't undo “{}”: {e}", s.label))?;
+                .map_err(|e| format!("Cannot undo “{}”: {e}", s.label))?;
             let r = p
                 .apply(target, format!("undo {}", s.label))
                 .map_err(|e| e.to_string())?;
@@ -150,10 +150,10 @@ fn run(
             Ok(msg)
         }
         Job::Redo => {
-            let s = redo.pop().ok_or("Nothing to redo")?;
-            // `before` of the original edit is what undo restored.
+            let s = redo.pop().ok_or("There is nothing to redo")?;
+            // Undo restored the `before` state of the original edit.
             let target = restore(&p.data, &s.before, &s.after)
-                .map_err(|e| format!("Can't redo “{}”: {e}", s.label))?;
+                .map_err(|e| format!("Cannot redo “{}”: {e}", s.label))?;
             let r = p
                 .apply(target, format!("redo {}", s.label))
                 .map_err(|e| e.to_string())?;
@@ -168,15 +168,18 @@ fn run(
     }
 }
 
-/// Bring the files an edit changed from `from` back to `to`, if they still
-/// match `from`. Files the edit did not touch keep their current content.
+/// Change the files that an edit changed from `from` back to `to`, if they
+/// still match `from`. Files that the edit did not change keep their current content.
 fn restore(cur: &ProjectData, from: &ProjectData, to: &ProjectData) -> Result<ProjectData, String> {
     let mut out = cur.clone();
     macro_rules! part {
         ($f:ident, $name:expr) => {
             if from.$f != to.$f {
                 if cur.$f != from.$f {
-                    return Err(format!("{} changed since, probably by the agent", $name));
+                    return Err(format!(
+                        "{} changed after this edit. The agent probably changed it.",
+                        $name
+                    ));
                 }
                 out.$f = to.$f.clone();
             }
@@ -231,7 +234,7 @@ mod tests {
         b.placement
             .placements
             .insert("R1".into(), Placement::at(1.0, 1.0));
-        // Undo with nobody else touching anything.
+        // Undo when nobody else changed anything.
         let back = restore(&b, &b, &a).unwrap();
         assert_eq!(back.placement, a.placement);
         // Someone moved R1 again after our edit.

@@ -47,7 +47,7 @@ fn place_route_pour_check() {
     let m = c.ok("measure", json!({"from": "U1.1", "to": "U1.8"}));
     assert!(m["distance"].as_f64().unwrap() > 4.0, "{m}");
 
-    // Hand-route one connection, autoroute the rest except GND.
+    // Route one connection by hand. Autoroute all other nets except GND.
     let (err, msg) = c.call(
         "route_trace",
         json!({"layer": "bottom", "points": ["R1.2", "U1.2"]}),
@@ -68,6 +68,6 @@ fn place_route_pour_check() {
     let rn = c.ok("ratsnest", json!({}));
     assert!(
         rn.as_array().unwrap().is_empty(),
-        "GND pour should connect everything: {rn}"
+        "the GND pour must connect all pads: {rn}"
     );
 }

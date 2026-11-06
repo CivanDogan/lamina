@@ -1,5 +1,5 @@
-//! Reader for the Gerber and Excellon subset Lamina writes, used to check
-//! exports by reading them back.
+//! A reader for the subset of Gerber and Excellon that Lamina writes. The tests
+//! use it to read exports back and check them.
 
 use geo::{BooleanOps, MultiPolygon};
 use lamina_geom::fill::inflate;
@@ -37,11 +37,14 @@ pub fn read_gerber(text: &str) -> Result<MultiPolygon<f64>, String> {
         }
         if let Some(rest) = line.strip_prefix("%ADD") {
             let rest = rest.trim_end_matches("*%");
-            let (n, spec) = rest.split_at(rest.find('C').ok_or("unsupported aperture")?);
+            let (n, spec) = rest.split_at(rest.find('C').ok_or("The aperture is not supported")?);
             let d: f64 = spec[2..]
                 .parse()
-                .map_err(|_| format!("bad aperture {line}"))?;
-            apertures.insert(n.parse().map_err(|_| "bad aperture number")?, d);
+                .map_err(|_| format!("The aperture is not valid: {line}"))?;
+            apertures.insert(
+                n.parse().map_err(|_| "The aperture number is not valid")?,
+                d,
+            );
             continue;
         }
         if line == "%LPD*%" || line == "%LPC*%" {
@@ -70,19 +73,25 @@ pub fn read_gerber(text: &str) -> Result<MultiPolygon<f64>, String> {
             continue;
         }
         if let Some(n) = line.strip_prefix('D').and_then(|s| s.strip_suffix('*')) {
-            let n: u32 = n.parse().map_err(|_| format!("bad line {line}"))?;
+            let n: u32 = n
+                .parse()
+                .map_err(|_| format!("The line is not valid: {line}"))?;
             ap = Some(
                 *apertures
                     .get(&n)
-                    .ok_or(format!("aperture D{n} undefined"))?,
+                    .ok_or(format!("The aperture D{n} is not defined"))?,
             );
             continue;
         }
         if let Some(rest) = line.strip_prefix('X') {
-            let yi = rest.find('Y').ok_or(format!("bad line {line}"))?;
-            let di = rest.find('D').ok_or(format!("bad line {line}"))?;
-            let x = num(&rest[..yi]).ok_or(format!("bad x in {line}"))?;
-            let y = num(&rest[yi + 1..di]).ok_or(format!("bad y in {line}"))?;
+            let yi = rest
+                .find('Y')
+                .ok_or(format!("The line is not valid: {line}"))?;
+            let di = rest
+                .find('D')
+                .ok_or(format!("The line is not valid: {line}"))?;
+            let x = num(&rest[..yi]).ok_or(format!("The X value is not valid: {line}"))?;
+            let y = num(&rest[yi + 1..di]).ok_or(format!("The Y value is not valid: {line}"))?;
             let op = &rest[di..rest.len() - 1];
             let p = Point::new(x, y);
             if in_region {
@@ -91,7 +100,7 @@ pub fn read_gerber(text: &str) -> Result<MultiPolygon<f64>, String> {
                 }
                 region.push(p);
             } else {
-                let d = ap.ok_or("draw without aperture")?;
+                let d = ap.ok_or("A draw has no aperture")?;
                 let shape = match op {
                     "D03" => Some(Prim::Circle { c: p, r: d / 2.0 }),
                     "D01" => Some(Prim::Capsule {
@@ -126,7 +135,7 @@ pub fn read_gerber(text: &str) -> Result<MultiPolygon<f64>, String> {
     Ok(acc)
 }
 
-/// Read an Excellon file: (diameter, start, end) per hole; start == end for round holes.
+/// Read an Excellon file: (diameter, start, end) for each hole. For a round hole, start == end.
 pub fn read_excellon(text: &str) -> Result<Vec<(f64, Point, Point)>, String> {
     let mut tools: std::collections::HashMap<String, f64> = Default::default();
     let mut tool = None;
@@ -142,7 +151,8 @@ pub fn read_excellon(text: &str) -> Result<Vec<(f64, Point, Point)>, String> {
             let (t, d) = line.split_once('C').unwrap();
             tools.insert(
                 t.to_string(),
-                d.parse().map_err(|_| format!("bad tool {line}"))?,
+                d.parse()
+                    .map_err(|_| format!("The tool is not valid: {line}"))?,
             );
             continue;
         }
@@ -152,15 +162,15 @@ pub fn read_excellon(text: &str) -> Result<Vec<(f64, Point, Point)>, String> {
             continue;
         }
         if line.starts_with('X') {
-            let d = tool.ok_or("hole without tool")?;
+            let d = tool.ok_or("A hole has no tool")?;
             if let Some((a, b)) = line.split_once("G85") {
                 out.push((
                     d,
-                    parse_xy(a).ok_or("bad slot")?,
-                    parse_xy(b).ok_or("bad slot")?,
+                    parse_xy(a).ok_or("The slot is not valid")?,
+                    parse_xy(b).ok_or("The slot is not valid")?,
                 ));
             } else {
-                let p = parse_xy(line).ok_or(format!("bad hole {line}"))?;
+                let p = parse_xy(line).ok_or(format!("The hole is not valid: {line}"))?;
                 out.push((d, p, p));
             }
         }

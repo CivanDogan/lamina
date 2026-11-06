@@ -1,4 +1,4 @@
-//! Export a board, read the Gerbers back and compare copper area with the model.
+//! Export a board, read the Gerbers back and compare the copper area with the model.
 
 use geo::{Area, BooleanOps, MultiPolygon};
 use lamina_footprint::{Options, from_package};
@@ -121,8 +121,8 @@ fn bom_and_cpl() {
     assert!(warnings.iter().any(|w| w.contains("U1 has no LCSC")));
 }
 
-/// The general reader agrees with the export-subset reader, and a whole fab
-/// set imports back as a board.
+/// The general reader gives the same result as the export-subset reader, and a
+/// full fab set imports back as a board.
 #[test]
 fn general_reader_and_fab_import() {
     let d = board();
@@ -158,7 +158,7 @@ fn general_reader_and_fab_import() {
     // Three header holes, plated.
     assert_eq!(e.board.holes.len(), 3, "{:?}", b.notes);
     assert!(e.board.holes.iter().all(|h| h.plated));
-    // Copper drawings carry the same area as the exported top layer.
+    // The copper drawings have the same area as the exported top layer.
     let top: f64 = e
         .routing
         .graphics

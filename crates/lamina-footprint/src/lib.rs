@@ -9,7 +9,7 @@ pub use ipc::{Density, Dim};
 
 use lamina_model::*;
 
-/// File-safe id for a package name and density, e.g. `R_0603_B`.
+/// A file-safe id for a package name and density, for example `R_0603_B`.
 pub fn default_id(package: &str, density: Density) -> String {
     let mut id: String = package
         .chars()
@@ -28,7 +28,7 @@ pub fn default_id(package: &str, density: Density) -> String {
     id
 }
 
-/// Generate a footprint for a named package (see [`presets::EXAMPLES`]).
+/// Generates a footprint for a named package (see [`presets::EXAMPLES`]).
 pub fn from_package(package: &str, opt: &Options, id: Option<&str>) -> Result<Footprint, String> {
     let spec = presets::resolve(package)?;
     let id = id
@@ -37,8 +37,8 @@ pub fn from_package(package: &str, opt: &Options, id: Option<&str>) -> Result<Fo
     generate(&id, package, &spec, opt)
 }
 
-/// Finish a footprint typed in from a datasheet: check pads and add a
-/// courtyard and silkscreen when missing.
+/// Completes a footprint typed in from a datasheet. It checks the pads. If
+/// there is no courtyard, it adds a courtyard and silkscreen.
 pub fn from_pads(
     mut fp: Footprint,
     body: Option<(f64, f64)>,
@@ -46,19 +46,19 @@ pub fn from_pads(
 ) -> Result<Footprint, String> {
     if !valid_id(&fp.id) {
         return Err(format!(
-            "footprint id `{}` must use letters, digits, . _ -",
+            "The footprint id `{}` is not valid. Use only letters, digits, . _ -",
             fp.id
         ));
     }
     if fp.pads.is_empty() {
-        return Err("footprint has no pads".into());
+        return Err("The footprint has no pads.".into());
     }
     for p in &fp.pads {
         p.shape
             .check()
             .map_err(|e| format!("pad {}: {e}", p.number))?;
         if !p.at.is_finite() || !p.rotation.is_finite() {
-            return Err(format!("pad {}: position is not finite", p.number));
+            return Err(format!("pad {}: the position is not finite.", p.number));
         }
         if let PadKind::Through { drill, .. } = &p.kind {
             drill
@@ -71,7 +71,7 @@ pub fn from_pads(
             };
             if w.min(h) <= need {
                 return Err(format!(
-                    "pad {}: copper is not larger than the drill",
+                    "pad {}: the copper is not larger than the drill. Make the pad larger or the drill smaller.",
                     p.number
                 ));
             }
@@ -126,7 +126,7 @@ mod tests {
     fn soic8_layout() {
         let fp = from_package("SOIC-8", &Options::default(), None).unwrap();
         assert_eq!(fp.pads.len(), 8);
-        // Pin 1 top-left, pin 4 bottom-left, pin 5 bottom-right, pin 8 top-right.
+        // Pin 1 is top-left, pin 4 bottom-left, pin 5 bottom-right, pin 8 top-right.
         let p1 = pad(&fp, "1").at;
         let p4 = pad(&fp, "4").at;
         let p5 = pad(&fp, "5").at;
@@ -134,7 +134,7 @@ mod tests {
         assert!(p1.x < 0.0 && p1.y > 0.0);
         assert!((p1.y - 1.905).abs() < 1e-9 && (p4.y + 1.905).abs() < 1e-9);
         assert!(p5.x > 0.0 && p5.y < 0.0 && p8.y > 0.0);
-        // Common SOIC-8 land: 1.95 x 0.6 mm pads, centres 2.475 mm from the axis.
+        // A usual SOIC-8 land: 1.95 x 0.6 mm pads, with centres 2.475 mm from the axis.
         let (len, wid) = pad(&fp, "1").shape.size();
         assert!((1.4..2.1).contains(&len), "{len}");
         assert!((0.55..0.7).contains(&wid), "{wid}");
@@ -148,11 +148,14 @@ mod tests {
         let (_, w) = pad(&fp, "1").shape.size();
         assert!(
             w <= 0.45 + 1e-9,
-            "pad width {w} leaves less than 0.2 mm gap"
+            "The pad width {w} gives a gap of less than 0.2 mm."
         );
         let p14 = pad(&fp, "14").at;
         let p15 = pad(&fp, "15").at;
-        assert!((p14.y - p15.y).abs() < 1e-9, "14 and 15 face each other");
+        assert!(
+            (p14.y - p15.y).abs() < 1e-9,
+            "14 and 15 must be opposite each other."
+        );
     }
 
     #[test]
@@ -173,7 +176,7 @@ mod tests {
         let ep = pad(&fp, "33");
         assert_eq!(ep.at, Point::new(0.0, 0.0));
         assert!(ep.paste_margin.unwrap() < 0.0);
-        // Pin 1 left side, top; pin 9 bottom side, left.
+        // Pin 1 is on the left side, at the top. Pin 9 is on the bottom side, at the left.
         assert!(pad(&fp, "1").at.x < -2.0 && pad(&fp, "1").at.y > 1.5);
         assert!(pad(&fp, "9").at.y < -2.0 && pad(&fp, "9").at.x < -1.5);
     }
@@ -215,7 +218,7 @@ mod tests {
                                 && q.x < r.max.x + 0.15
                                 && q.y > r.min.y - 0.15
                                 && q.y < r.max.y + 0.15;
-                            assert!(!inside, "{name}: silk touches pad {}", p.number);
+                            assert!(!inside, "{name}: the silk touches pad {}", p.number);
                         }
                     }
                 }

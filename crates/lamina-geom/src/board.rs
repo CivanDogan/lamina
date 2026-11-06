@@ -6,7 +6,7 @@ use lamina_model::*;
 
 use crate::prim::Prim;
 
-/// What a copper primitive belongs to.
+/// The item that a copper primitive belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Owner {
     Pad {
@@ -31,7 +31,7 @@ pub enum Owner {
 }
 
 impl Owner {
-    /// Id used in violation item lists.
+    /// The id for the item lists of violations.
     pub fn label(&self) -> String {
         match self {
             Owner::Pad { part, pad, .. } => {
@@ -48,7 +48,7 @@ impl Owner {
         }
     }
 
-    /// Items with the same body share this key (a through pad on every layer).
+    /// Items with the same body have the same key (a through pad on all layers).
     pub fn body(&self) -> String {
         match self {
             Owner::Pad { part, index, .. } => format!("pad:{part}:{index}"),
@@ -62,7 +62,7 @@ impl Owner {
 
 #[derive(Debug, Clone)]
 pub struct CopperItem {
-    /// Copper layer index, 0 = top.
+    /// The copper layer index. 0 is the top.
     pub layer: u8,
     pub net: Option<String>,
     pub prim: Prim,
@@ -77,7 +77,7 @@ pub struct DrillItem {
     pub owner: Owner,
 }
 
-/// Pad shape in board coordinates.
+/// The pad shape in board coordinates.
 pub fn pad_prim(pad: &Pad, pl: &Placement) -> Prim {
     let rot = pad.rotation;
     let local = |p: Point| pl.transform(p.rotated(rot).add(pad.at));
@@ -154,7 +154,7 @@ fn rounded_rect(w: f64, h: f64, r: f64) -> Vec<Point> {
     out
 }
 
-/// Polygon prim, forced counter-clockwise.
+/// A polygon prim, always counter-clockwise.
 pub fn poly(mut pts: Vec<Point>) -> Prim {
     if crate::prim::ring_area(&pts) < 0.0 {
         pts.reverse();
@@ -165,7 +165,7 @@ pub fn poly(mut pts: Vec<Point>) -> Prim {
     }
 }
 
-/// Copper layer index for an SMD pad on a part placed on `side`.
+/// The copper layer index for an SMD pad on a part on `side`.
 pub fn smd_layer(side: Side, layers: u8) -> u8 {
     match side {
         Side::Top => 0,
@@ -177,7 +177,7 @@ pub fn smd_layer(side: Side, layers: u8) -> u8 {
 pub struct BoardGeometry {
     pub copper: Vec<CopperItem>,
     pub drills: Vec<DrillItem>,
-    /// Board outline flattened, and cut-outs.
+    /// The flattened board outline, and the cut-outs.
     pub outline: Option<Vec<Point>>,
     pub cutouts: Vec<Vec<Point>>,
     pub layers: u8,
@@ -207,7 +207,7 @@ pub fn drill_prim(drill: &Drill, at: Point, rotation: f64) -> Prim {
     }
 }
 
-/// Footprint pads of a placed part in board coordinates: (pad, index, prim, layers).
+/// The footprint pads of a placed part in board coordinates: (pad, index, prim, layers).
 pub fn placed_pads<'a>(
     fp: &'a Footprint,
     pl: &Placement,
@@ -383,7 +383,7 @@ pub fn build(d: &ProjectData) -> BoardGeometry {
     }
 }
 
-/// Courtyard polygon of a placed part (footprint courtyard rect or polygon).
+/// The courtyard polygon of a placed part (the courtyard rect or polygon of the footprint).
 pub fn courtyard(fp: &Footprint, pl: &Placement) -> Option<Vec<Point>> {
     let corners = |r: Rect| {
         vec![
@@ -393,7 +393,7 @@ pub fn courtyard(fp: &Footprint, pl: &Placement) -> Option<Vec<Point>> {
             Point::new(r.min.x, r.max.y),
         ]
     };
-    // Courtyards are often drawn as loose lines and arcs: chain them.
+    // Courtyards are frequently loose lines and arcs. Join them into a chain.
     let edges: Vec<Edge> = fp
         .graphics
         .iter()
@@ -404,7 +404,7 @@ pub fn courtyard(fp: &Footprint, pl: &Placement) -> Option<Vec<Point>> {
     let cy = match loops.len() {
         0 => corners(fp.courtyard_bbox()?),
         1 => loops[0].flatten(0.02),
-        // Several pieces: their convex hull.
+        // If there are more pieces, use their convex hull.
         _ => convex_hull(loops.iter().flat_map(|c| c.flatten(0.02)).collect()),
     };
     if cy.len() < 3 {
@@ -419,7 +419,7 @@ pub fn courtyard(fp: &Footprint, pl: &Placement) -> Option<Vec<Point>> {
     Some(pts)
 }
 
-/// Convex hull, counter-clockwise (monotone chain).
+/// The convex hull, counter-clockwise (monotone chain).
 pub fn convex_hull(mut pts: Vec<Point>) -> Vec<Point> {
     pts.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
     pts.dedup_by(|a, b| a.dist(*b) < 1e-9);
@@ -447,7 +447,7 @@ pub fn convex_hull(mut pts: Vec<Point>) -> Vec<Point> {
     h
 }
 
-/// Footprint keep-outs of a placed part: (copper layer indices, outline, forbid).
+/// The footprint keep-outs of a placed part: (copper layer indices, outline, forbid).
 pub fn part_keepouts(
     fp: &Footprint,
     pl: &Placement,
@@ -512,7 +512,7 @@ mod courtyard_tests {
             a: Point::new(a.0, a.1),
             b: Point::new(b.0, b.1),
         };
-        // An L: 4 x 2 with a 2 x 2 block on top of its left half.
+        // An L shape: 4 x 2 with a 2 x 2 block on top of its left half.
         let f = fp(vec![
             l((0.0, 0.0), (4.0, 0.0)),
             l((4.0, 0.0), (4.0, 2.0)),

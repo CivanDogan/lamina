@@ -1,4 +1,4 @@
-//! Hand-drawn widgets in the viewer's own vocabulary.
+//! Custom widgets for the viewer.
 
 use std::time::Instant;
 
@@ -14,7 +14,7 @@ pub fn wordmark(ui: &mut egui::Ui) {
     let p = ui.painter();
     let x = rect.left();
     let cy = rect.center().y;
-    // Logo units are the SVG's 64 grid; the mark spans y 7..56.5.
+    // Logo units are the 64-unit grid of the SVG. The mark goes from y 7 to y 56.5.
     let k = 0.4;
     let at = |ux: f32, uy: f32| Pos2::new(x + (ux - 15.0) * k, cy + (uy - 31.75) * k);
     let trace = [
@@ -43,7 +43,7 @@ pub fn wordmark(ui: &mut egui::Ui) {
     );
 }
 
-/// Two-option switch with a sliding thumb. Returns true when changed.
+/// A switch with two options and a thumb that slides. Returns true if the value changed.
 pub fn segmented(ui: &mut egui::Ui, rect: Rect, labels: &[&str], sel: &mut usize) -> bool {
     let id = ui.scope_id().with("segmented");
     let resp = ui.interact(rect, id, Sense::click());
@@ -121,7 +121,7 @@ pub fn chip(ui: &mut egui::Ui, color: Color32, text: &str) {
     );
 }
 
-/// "live" indicator that brightens right after a reload.
+/// The "live" indicator. It becomes brighter just after a reload.
 pub fn live_dot(ui: &mut egui::Ui, last: Option<Instant>) {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(64.0, 26.0), Sense::hover());
     let p = ui.painter();
@@ -142,10 +142,10 @@ pub fn live_dot(ui: &mut egui::Ui, last: Option<Instant>) {
     );
     let tip = match last {
         Some(t) => format!(
-            "Watching the project folder. Last update {:.1} s ago.",
+            "The viewer watches the project folder. The last update was {:.1} s ago.",
             t.elapsed().as_secs_f32()
         ),
-        None => "Waiting for the first load".to_string(),
+        None => "The viewer waits for the first load.".to_string(),
     };
     resp.on_hover_text(tip);
 }
@@ -223,7 +223,7 @@ pub fn primary_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
     enabled && resp.clicked()
 }
 
-/// Layer row: swatch, name, item count, eye. Returns true when toggled.
+/// Layer row: swatch, name, item count, eye. Returns true if the user toggled it.
 pub fn layer_row(
     ui: &mut egui::Ui,
     name: &str,
@@ -297,7 +297,7 @@ fn eye(p: &egui::Painter, c: Pos2, open: bool) {
     }
 }
 
-/// One rule violation. Returns true when clicked (to zoom to it).
+/// One rule violation. Returns true if the user clicked it (to zoom to it).
 pub fn violation_row(
     ui: &mut egui::Ui,
     color: Color32,
@@ -403,9 +403,8 @@ pub fn note_row(ui: &mut egui::Ui, n: &lamina_model::Note) {
     );
 }
 
-/// Quiet hint along the bottom of the canvas.
-/// Hint line at the bottom of the canvas. Items (split by ` · `) are
-/// dropped from the end until it fits.
+/// The hint line at the bottom of the canvas. If the line is too long, items
+/// (split by ` · `) are removed from the end until it fits.
 pub fn hint(p: &egui::Painter, rect: Rect, text: &str) {
     let room = rect.width() - 160.0;
     let items: Vec<&str> = text.split(" · ").collect();
@@ -415,8 +414,8 @@ pub fn hint(p: &egui::Painter, rect: Rect, text: &str) {
         n -= 1;
         line = format!("{} · F1 for more", items[..n].join(" · "));
     }
-    // Centred in the space right of the scale bar, on a backing so it
-    // reads over copper.
+    // Put it in the centre of the space to the right of the scale bar. A dark
+    // background makes it easy to read over copper.
     let at = Pos2::new(
         rect.left() + 140.0 + (rect.width() - 140.0) / 2.0,
         rect.bottom() - 16.0,
@@ -429,7 +428,7 @@ pub fn hint(p: &egui::Painter, rect: Rect, text: &str) {
 
 /// Toolbar button: label with its shortcut key, accent when active.
 pub fn tool_button(ui: &mut egui::Ui, label: &str, key: &str, active: bool) -> egui::Response {
-    // Compact form: the key letter alone.
+    // Compact form: only the key letter.
     if label.is_empty() {
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(28.0, 28.0), Sense::click());
         let p = ui.painter();
@@ -499,7 +498,7 @@ pub fn vdivider(ui: &mut egui::Ui) {
     );
 }
 
-/// Small pill showing a value; returns the response for clicks.
+/// A small pill that shows a value. Returns the response for clicks.
 pub fn pill(ui: &mut egui::Ui, swatch: Option<Color32>, text: &str) -> egui::Response {
     let g = ui
         .painter()

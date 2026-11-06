@@ -1,8 +1,8 @@
 //! Lamina's board data model.
 //!
-//! Units are millimetres (f64), Y points up, rotations are degrees
-//! counter-clockwise, and the project origin is fixed: changing the board
-//! outline never moves anything else.
+//! Units are millimetres (f64). Y points up. Rotations are in degrees
+//! counter-clockwise. The project origin is fixed: if you change the board
+//! outline, nothing else moves.
 
 pub mod error;
 pub mod files;

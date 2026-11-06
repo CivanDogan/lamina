@@ -1,5 +1,5 @@
-//! Board edits made from the viewer. Each one changes a copy of the
-//! project data; the editor thread commits it through the engine.
+//! Board edits from the viewer. Each edit changes a copy of the project
+//! data. The editor thread commits the copy through the engine.
 
 use lamina_model::*;
 
@@ -7,7 +7,7 @@ use lamina_model::*;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Sel {
     Part(String),
-    /// A track; `seg` is the clicked segment.
+    /// A track. `seg` is the segment that the user clicked.
     Track {
         id: String,
         seg: usize,
@@ -27,7 +27,7 @@ impl Sel {
         }
     }
 
-    /// Same item, ignoring the segment of a track.
+    /// True if it is the same item. The segment of a track is not compared.
     pub fn same_item(&self, o: &Sel) -> bool {
         match (self, o) {
             (Sel::Track { id: a, .. }, Sel::Track { id: b, .. }) => a == b,
@@ -36,7 +36,7 @@ impl Sel {
     }
 }
 
-/// An outline whose vertices can be dragged.
+/// An outline whose vertices the user can drag.
 #[derive(Clone, Debug, PartialEq)]
 pub enum VertexOf {
     Track(String),
@@ -60,7 +60,7 @@ fn norm_deg(a: f64) -> f64 {
     if r >= 360.0 { 0.0 } else { r }
 }
 
-/// Next free id with this prefix among all routing items and holes.
+/// The next free id with this prefix in all routing items and holes.
 pub fn new_id(d: &ProjectData, prefix: &str) -> String {
     let r = &d.routing;
     let ids: Vec<&str> = r
@@ -89,7 +89,7 @@ fn placed_mut<'a>(d: &'a mut ProjectData, r: &str) -> Result<&'a mut Placement, 
         .get_mut(r)
         .ok_or_else(|| format!("{r} is not on the board"))?;
     if pl.locked {
-        return Err(format!("{r} is locked; unlock it in the inspector first"));
+        return Err(format!("{r} is locked. Unlock it in the inspector first."));
     }
     Ok(pl)
 }
@@ -147,10 +147,10 @@ pub fn set_locked(d: &mut ProjectData, refs: &[String], locked: bool) -> EditRes
 
 pub fn set_placement(d: &mut ProjectData, r: &str, mut pl: Placement) -> EditResult {
     if !d.parts.parts.contains_key(r) {
-        return Err(format!("no part {r}"));
+        return Err(format!("There is no part {r}"));
     }
     if !(pl.x.is_finite() && pl.y.is_finite()) {
-        return Err("position is not a number".into());
+        return Err("The position is not a number".into());
     }
     pl.x = r6(pl.x);
     pl.y = r6(pl.y);
@@ -163,12 +163,12 @@ pub fn set_placement(d: &mut ProjectData, r: &str, mut pl: Placement) -> EditRes
     })
 }
 
-/// Delete selected items. Parts leave the board but stay in the parts
-/// list, so they can be placed again; a track loses only the clicked
+/// Delete the selected items. A part goes off the board but stays in the
+/// parts list, so you can place it again. A track loses only the clicked
 /// segment.
 pub fn delete(d: &mut ProjectData, sels: &[Sel]) -> EditResult {
     let mut names = Vec::new();
-    // Highest segment first so earlier indices stay valid.
+    // Do the highest segment first, so that the lower indices stay valid.
     let mut segs: Vec<(&str, usize)> = sels
         .iter()
         .filter_map(|s| match s {
@@ -204,12 +204,14 @@ pub fn delete(d: &mut ProjectData, sels: &[Sel]) -> EditResult {
                 d.board.holes.retain(|v| &v.id != id);
                 names.push(id.clone());
             }
-            Sel::Outline => return Err("the board outline can be edited but not deleted".into()),
+            Sel::Outline => {
+                return Err("You can edit the board outline, but you cannot delete it".into());
+            }
             Sel::Track { .. } => {}
         }
     }
     if names.is_empty() {
-        return Err("nothing to delete".into());
+        return Err("There is nothing to delete".into());
     }
     Ok(format!("Deleted {}", names.join(", ")))
 }
@@ -221,7 +223,7 @@ fn delete_segment(d: &mut ProjectData, id: &str, seg: usize) -> Result<(), Strin
         .tracks
         .iter()
         .position(|t| t.id == id)
-        .ok_or_else(|| format!("no track {id}"))?;
+        .ok_or_else(|| format!("There is no track {id}"))?;
     let t = d.routing.tracks[i].clone();
     if seg + 1 >= t.points.len() {
         return Err(format!("{id} has no segment {}", seg + 1));
@@ -254,14 +256,14 @@ fn delete_segment(d: &mut ProjectData, id: &str, seg: usize) -> Result<(), Strin
     Ok(())
 }
 
-/// Move a via and the track ends of its net that sit on it.
+/// Move a via and the track ends of its net that are on it.
 pub fn move_via(d: &mut ProjectData, id: &str, delta: Point) -> EditResult {
     let v = d
         .routing
         .vias
         .iter_mut()
         .find(|v| v.id == id)
-        .ok_or_else(|| format!("no via {id}"))?;
+        .ok_or_else(|| format!("There is no via {id}"))?;
     let old = v.at;
     v.at = p6(old.add(delta));
     let net = v.net.clone();
@@ -276,14 +278,14 @@ pub fn move_via(d: &mut ProjectData, id: &str, delta: Point) -> EditResult {
     Ok(format!("Moved {id} to {:.3}, {:.3} mm", new.x, new.y))
 }
 
-/// Drag one track segment; its neighbours stretch to follow.
+/// Drag one track segment. The segments next to it stretch to follow it.
 pub fn move_segment(d: &mut ProjectData, id: &str, seg: usize, delta: Point) -> EditResult {
     let t = d
         .routing
         .tracks
         .iter_mut()
         .find(|t| t.id == id)
-        .ok_or_else(|| format!("no track {id}"))?;
+        .ok_or_else(|| format!("There is no track {id}"))?;
     if seg + 1 >= t.points.len() {
         return Err(format!("{id} has no segment {}", seg + 1));
     }
@@ -301,24 +303,24 @@ fn contour_mut<'a>(d: &'a mut ProjectData, of: &VertexOf) -> Result<&'a mut Cont
             .iter_mut()
             .find(|z| &z.id == id)
             .map(|z| &mut z.outline)
-            .ok_or_else(|| format!("no zone {id}")),
+            .ok_or_else(|| format!("There is no zone {id}")),
         VertexOf::Keepout(id) => d
             .routing
             .keepouts
             .iter_mut()
             .find(|z| &z.id == id)
             .map(|z| &mut z.outline)
-            .ok_or_else(|| format!("no keep-out {id}")),
+            .ok_or_else(|| format!("There is no keep-out {id}")),
         VertexOf::Outline => d
             .board
             .outline
             .as_mut()
-            .ok_or_else(|| "the board has no outline".to_string()),
-        VertexOf::Track(_) => Err("a track is not an outline".into()),
+            .ok_or_else(|| "The board has no outline".to_string()),
+        VertexOf::Track(_) => Err("A track is not an outline".into()),
     }
 }
 
-/// Points that can be dragged, in order.
+/// The points that the user can drag, in order.
 pub fn vertices(d: &ProjectData, of: &VertexOf) -> Vec<Point> {
     match of {
         VertexOf::Track(id) => d
@@ -359,21 +361,24 @@ pub fn move_vertex(d: &mut ProjectData, of: &VertexOf, idx: usize, to: Point) ->
             .tracks
             .iter_mut()
             .find(|t| &t.id == id)
-            .ok_or_else(|| format!("no track {id}"))?;
-        let p = t.points.get_mut(idx).ok_or("no such point")?;
+            .ok_or_else(|| format!("There is no track {id}"))?;
+        let p = t.points.get_mut(idx).ok_or("This point does not exist")?;
         *p = to;
         t.points.dedup_by(|a, b| a.dist(*b) < 1e-9);
         if t.points.len() < 2 {
-            return Err("the track would collapse to a point".into());
+            return Err("The track cannot become a single point".into());
         }
         return Ok(format!("Moved a corner of {id}"));
     }
     let c = contour_mut(d, of)?;
-    let v = c.vertices.get_mut(idx).ok_or("no such vertex")?;
+    let v = c
+        .vertices
+        .get_mut(idx)
+        .ok_or("This vertex does not exist")?;
     let delta = to.sub(v.point());
     v.x = to.x;
     v.y = to.y;
-    // An arc centre follows its start vertex so the shape stays valid.
+    // An arc centre moves with its start vertex, so the shape stays valid.
     if let Some(a) = v.arc.as_mut() {
         a.center = p6(a.center.add(Point::new(delta.x / 2.0, delta.y / 2.0)));
     }
@@ -381,7 +386,7 @@ pub fn move_vertex(d: &mut ProjectData, of: &VertexOf, idx: usize, to: Point) ->
     Ok("Moved a vertex".into())
 }
 
-/// Translate a whole zone or keep-out outline.
+/// Move a full zone or keep-out outline.
 pub fn move_area(d: &mut ProjectData, of: &VertexOf, delta: Point) -> EditResult {
     let c = contour_mut(d, of)?;
     for v in c.vertices.iter_mut() {
@@ -402,7 +407,7 @@ pub fn move_area(d: &mut ProjectData, of: &VertexOf, delta: Point) -> EditResult
     ))
 }
 
-/// A hand-drawn route: runs of points per layer, joined by vias.
+/// A route that the user draws: runs of points on each layer, with vias between them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Route {
     pub net: String,
@@ -416,7 +421,7 @@ pub fn add_route(d: &mut ProjectData, r: &Route) -> EditResult {
         .nets
         .nets
         .get(&r.net)
-        .ok_or_else(|| format!("no net {}", r.net))?;
+        .ok_or_else(|| format!("There is no net {}", r.net))?;
     let nc = d.board.rules.class(net.class.as_deref());
     let via_d = nc.via_diameter.unwrap_or(d.board.rules.via_diameter);
     let via_drill = nc.via_drill.unwrap_or(d.board.rules.via_drill);
@@ -452,7 +457,7 @@ pub fn add_route(d: &mut ProjectData, r: &Route) -> EditResult {
         });
     }
     if made == 0 && r.vias.is_empty() {
-        return Err("the route has no length".into());
+        return Err("The route has no length".into());
     }
     Ok(format!(
         "Routed {} · {:.2} mm{}",
@@ -486,7 +491,7 @@ fn polygon(pts: &[Point]) -> Result<Contour, String> {
         pts.pop();
     }
     if pts.len() < 3 {
-        return Err("an outline needs at least three corners".into());
+        return Err("An outline must have at least three corners".into());
     }
     let mut c = Contour {
         vertices: pts.iter().map(|p| Vertex::line(p.x, p.y)).collect(),
@@ -507,7 +512,7 @@ pub fn add_zone(
     let outline = polygon(pts)?;
     if let Some(n) = &net {
         if !d.nets.nets.contains_key(n) {
-            return Err(format!("no net {n}"));
+            return Err(format!("There is no net {n}"));
         }
     }
     let id = new_id(d, "z");
@@ -560,7 +565,7 @@ fn list(refs: &[String]) -> String {
     }
 }
 
-/// Grid steps the user can cycle through, in mm.
+/// The grid steps that the user can select in turn, in mm.
 pub const GRIDS: [f64; 8] = [0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 1.27, 2.54];
 
 pub fn snap(v: f64, g: f64) -> f64 {
@@ -571,8 +576,8 @@ pub fn snap_pt(p: Point, g: f64) -> Point {
     Point::new(snap(p.x, g), snap(p.y, g))
 }
 
-/// The corner of a 45° route from `a` towards `b`: straight first, then
-/// diagonal (or the other way round with `diagonal_first`).
+/// The corner of a 45° route from `a` to `b`: first straight, then diagonal.
+/// With `diagonal_first`, the order is opposite.
 pub fn posture(a: Point, b: Point, diagonal_first: bool) -> Vec<Point> {
     let dx = b.x - a.x;
     let dy = b.y - a.y;

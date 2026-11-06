@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "LCSC / JLCPCB / EasyEDA part search and footprint import for Lamina"
+description = "Search LCSC / JLCPCB / EasyEDA parts and import their footprints into Lamina"
 
 [dependencies]
 lamina-model.workspace = true

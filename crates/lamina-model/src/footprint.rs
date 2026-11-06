@@ -1,5 +1,6 @@
-//! Footprints. Defined as seen from the top, origin at the part centre.
-//! Placing a part on the bottom side mirrors the footprint in X.
+//! Footprints. A footprint is defined as seen from the top, with the origin at
+//! the part centre. When you put a part on the bottom side, the footprint is
+//! mirrored in X.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,7 @@ pub const FOOTPRINT_SCHEMA: u32 = 1;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Footprint {
     pub schema: u32,
-    /// File-safe id, also the file name in `cache/footprints/<id>.json`.
+    /// A file-safe id. It is also the file name in `cache/footprints/<id>.json`.
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -22,7 +23,7 @@ pub struct Footprint {
     pub texts: Vec<FpText>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keepouts: Vec<FpKeepout>,
-    /// Body height above the board in mm, used for 3D placeholders and checks.
+    /// The height of the body above the board, in mm. 3D placeholders and checks use it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,7 +51,7 @@ impl Footprint {
         self.pads.iter().find(|p| p.number == number)
     }
 
-    /// Courtyard bounding box, or the pad extents when there is no courtyard.
+    /// The bounding box of the courtyard. If there is no courtyard, the pad extents.
     pub fn courtyard_bbox(&self) -> Option<Rect> {
         let pts: Vec<Point> = self
             .graphics
@@ -64,7 +65,7 @@ impl Footprint {
         self.pads_bbox()
     }
 
-    /// The part body for placeholders: fab drawing, else pads, else courtyard.
+    /// The part body for placeholders: the fab drawing, or else the pads, or else the courtyard.
     pub fn body_bbox(&self) -> Option<Rect> {
         let fab: Vec<Point> = self
             .graphics
@@ -77,8 +78,8 @@ impl Footprint {
             .or_else(|| self.courtyard_bbox())
     }
 
-    /// Whether the part has a physical body to draw: a model, a height, a
-    /// plated hole or a pasted pad. Mounting holes and fiducials have none.
+    /// True if the part has a physical body to draw: a model, a height, a
+    /// plated hole or a pad with paste. Mounting holes and fiducials have no body.
     pub fn has_body(&self) -> bool {
         self.model.is_some()
             || self.height.is_some()
@@ -112,23 +113,23 @@ pub fn valid_id(id: &str) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Pad {
-    /// Pad number as used in nets (`U1.3`). May be empty for mechanical pads.
+    /// The pad number that nets use (`U1.3`). It can be empty for mechanical pads.
     pub number: String,
     pub at: Point,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub rotation: f64,
     pub shape: PadShape,
     pub kind: PadKind,
-    /// Solder mask expansion; `None` uses the board rule.
+    /// The solder mask expansion. `None` uses the board rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mask_margin: Option<f64>,
-    /// Paste expansion (usually negative); `None` uses the board rule.
+    /// The paste expansion (usually negative). `None` uses the board rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paste_margin: Option<f64>,
-    /// Paste aperture present (SMD only).
+    /// True if the pad has a paste aperture (SMD only).
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub paste: bool,
-    /// Mask opening present.
+    /// True if the pad has a mask opening.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub mask: bool,
 }
@@ -201,7 +202,7 @@ pub enum PadShape {
         width: f64,
         height: f64,
     },
-    /// Custom outline relative to the pad centre.
+    /// A custom outline, relative to the pad centre.
     Polygon {
         points: Vec<Point>,
     },
@@ -220,7 +221,7 @@ impl PadShape {
         }
     }
 
-    /// Corner points of the shape's box (or polygon), unrotated, centred.
+    /// The corner points of the box (or polygon) of the shape, not rotated, centred.
     pub fn outline_points(&self) -> Vec<Point> {
         match self {
             PadShape::Polygon { points } => points.clone(),
@@ -236,7 +237,7 @@ impl PadShape {
             if v.is_finite() && v > 0.0 {
                 Ok(())
             } else {
-                Err(format!("pad {what} must be positive, got {v}"))
+                Err(format!("The pad {what} is {v}. It must be more than zero."))
             }
         };
         match self {
@@ -253,16 +254,18 @@ impl PadShape {
                 pos(*width, "width")?;
                 pos(*height, "height")?;
                 if !(radius.is_finite() && *radius >= 0.0 && *radius <= width.min(*height) / 2.0) {
-                    return Err(format!("round-rect radius {radius} out of range"));
+                    return Err(format!(
+                        "The round-rect radius {radius} is out of range. Use 0 to half the smaller side."
+                    ));
                 }
                 Ok(())
             }
             PadShape::Polygon { points } => {
                 if points.len() < 3 {
-                    return Err("polygon pad needs at least 3 points".into());
+                    return Err("A polygon pad must have a minimum of 3 points.".into());
                 }
                 if points.iter().any(|p| !p.is_finite()) {
-                    return Err("polygon pad has a non-finite point".into());
+                    return Err("The polygon pad has a point that is not finite.".into());
                 }
                 Ok(())
             }
@@ -273,9 +276,9 @@ impl PadShape {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PadKind {
-    /// Surface mount pad on the footprint's side.
+    /// A surface mount pad on the side of the footprint.
     Smd,
-    /// Through-hole pad on all copper layers.
+    /// A through-hole pad on all copper layers.
     Through { drill: Drill, plated: bool },
 }
 
@@ -285,7 +288,7 @@ pub enum Drill {
     Round {
         diameter: f64,
     },
-    /// Oblong slot, rotated with its pad or hole.
+    /// An oblong slot. It turns with its pad or hole.
     Slot {
         width: f64,
         height: f64,
@@ -305,12 +308,12 @@ impl Drill {
         match self {
             Drill::Round { diameter } if ok(*diameter) => Ok(()),
             Drill::Slot { width, height } if ok(*width) && ok(*height) => Ok(()),
-            _ => Err(format!("drill size must be positive: {self:?}")),
+            _ => Err(format!("The drill size must be more than zero: {self:?}")),
         }
     }
 }
 
-/// Footprint-local layers, relative to the side the part is placed on.
+/// Footprint-local layers, relative to the side that the part is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FpLayer {
@@ -326,7 +329,7 @@ pub enum FpLayer {
 pub struct FpGraphic {
     pub layer: FpLayer,
     pub shape: Shape,
-    /// Stroke width; 0 for filled shapes.
+    /// The stroke width. Use 0 for filled shapes.
     #[serde(default)]
     pub width: f64,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -336,7 +339,7 @@ pub struct FpGraphic {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FpText {
     pub layer: FpLayer,
-    /// `${ref}` and `${value}` are replaced when drawn.
+    /// `${ref}` and `${value}` are replaced when the text is drawn.
     pub text: String,
     pub at: Point,
     #[serde(default = "default_text_size")]
@@ -350,7 +353,7 @@ pub struct FpText {
 pub enum KeepoutScope {
     /// Every copper layer.
     AllCopper,
-    /// Copper on the side the part is placed on.
+    /// Copper on the side that the part is on.
     Front,
     /// Copper on the opposite side.
     Back,
@@ -392,9 +395,9 @@ pub struct FpKeepout {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelRef {
-    /// Path relative to the project's `cache/models/`.
+    /// The path relative to `cache/models/` in the project.
     pub file: String,
-    /// Offset in mm applied after rotation.
+    /// The offset in mm. It is applied after the rotation.
     #[serde(default, skip_serializing_if = "is_zero3")]
     pub offset: [f64; 3],
     /// Rotation in degrees about X, then Y, then Z.
@@ -404,7 +407,7 @@ pub struct ModelRef {
     pub scale: [f64; 3],
 }
 
-/// Where a footprint's geometry came from.
+/// The source of the geometry of a footprint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum Provenance {
@@ -414,7 +417,7 @@ pub enum Provenance {
         density: String,
         inputs: serde_json::Value,
     },
-    /// Typed in from a datasheet land pattern.
+    /// Typed in from the land pattern in a datasheet.
     Datasheet {
         document: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -429,10 +432,10 @@ pub enum Provenance {
     },
     /// Imported from a KiCad footprint library or board file.
     Kicad {
-        /// Library nickname, e.g. `Resistor_SMD`.
+        /// The library nickname, for example `Resistor_SMD`.
         library: String,
         footprint: String,
-        /// File or URL the footprint was read from.
+        /// The file or URL that the footprint was read from.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         path: String,
     },

@@ -69,7 +69,7 @@ fn tonemap(c: vec3<f32>) -> vec3<f32> {
 fn shade(albedo: vec3<f32>, n0: vec3<f32>, world: vec3<f32>, gloss: f32) -> vec3<f32> {
     let n = normalize(n0);
     let v = normalize(u.eye.xyz - world);
-    // The light rig follows the side being viewed: +1 from above, -1 from below.
+    // The light rig follows the side that you look at: +1 from above, -1 from below.
     let s = select(1.0, -1.0, u.params.x < 0.0);
     let l1 = normalize(vec3<f32>(-0.45, -0.6, 0.75 * s));
     let l2 = normalize(vec3<f32>(0.6, 0.35, 0.45 * s));
@@ -114,7 +114,7 @@ fn vs_mesh(v: MIn) -> MOut {
 @fragment
 fn fs_mesh(in: MOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
     var n = normalize(in.normal);
-    // Many vendor meshes have mixed winding: light the side we see.
+    // Many vendor meshes have mixed winding. Light the side that is visible.
     if (dot(n, u.eye.xyz - in.world) < 0.0) {
         n = -n;
     }

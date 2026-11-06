@@ -22,13 +22,14 @@ pub struct RectSpec {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SetOutline {
-    /// Rectangular board. Give either `rect` or `contour`.
+    /// A rectangular board. Give `rect` or `contour`, not both.
     #[serde(default)]
     pub rect: Option<RectSpec>,
-    /// Arbitrary outline of lines and arcs.
+    /// An outline of any shape, made of lines and arcs.
     #[serde(default)]
     pub contour: Option<Contour>,
-    /// Internal cut-outs; replaces existing ones when given.
+    /// Internal cut-outs. If you give them, they replace the cut-outs that
+    /// are on the board.
     #[serde(default)]
     pub cutouts: Option<Vec<Contour>>,
     #[serde(default)]
@@ -52,8 +53,8 @@ pub struct SetStackup {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 pub struct SetRules {
-    /// Partial rules: only the fields given are changed. Net classes given
-    /// here replace classes of the same name.
+    /// Partial rules. Only the fields that you give are changed. A net class
+    /// that you give here replaces the net class that has the same name.
     #[serde(default)]
     pub rules: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
@@ -66,18 +67,24 @@ impl Project {
             (Some(r), None) => {
                 for (v, n) in [(r.width, "width"), (r.height, "height")] {
                     if !(v.is_finite() && v > 0.0) {
-                        return Err(Error::invalid(format!("rect {n} must be positive")));
+                        return Err(Error::invalid(format!("The rect {n} must be more than 0.")));
                     }
                 }
                 if r.corner_radius < 0.0 || r.corner_radius * 2.0 > r.width.min(r.height) {
-                    return Err(Error::invalid("corner_radius out of range"));
+                    return Err(Error::invalid(
+                        "corner_radius is out of range. Use 0 to half the smaller side of the rect.",
+                    ));
                 }
                 Contour::rounded_rect(r.x, r.y, r.width, r.height, r.corner_radius)
             }
             (None, Some(c)) => c,
-            (None, None) => return Err(Error::invalid("give `rect` or `contour`")),
+            (None, None) => {
+                return Err(Error::invalid(
+                    "No outline is given. Give `rect` or `contour`.",
+                ));
+            }
             (Some(_), Some(_)) => {
-                return Err(Error::invalid("give only one of `rect` and `contour`"));
+                return Err(Error::invalid("Give only one of `rect` and `contour`."));
             }
         };
         contour.check().map_err(Error::Invalid)?;
@@ -125,7 +132,7 @@ impl Project {
         }
         s.check().map_err(Error::Invalid)?;
         let n = s.copper_layers;
-        // Removing layers that still carry copper would leave dangling data.
+        // If a layer that has copper on it is removed, that copper has no layer.
         let stranded: Vec<String> = d
             .routing
             .tracks
@@ -142,7 +149,8 @@ impl Project {
             .collect();
         if !stranded.is_empty() {
             return Err(Error::Refused(format!(
-                "these items are on layers a {n}-layer board does not have: {}",
+                "These items are on layers that a {n}-layer board does not have. \
+                 Move or delete them first: {}",
                 stranded.join(", ")
             )));
         }
@@ -166,7 +174,7 @@ impl Project {
                     .entry("net_classes")
                     .or_insert_with(|| serde_json::Value::Object(Default::default()));
                 let (Some(dst), Some(src)) = (classes.as_object_mut(), v.as_object()) else {
-                    return Err(Error::invalid("net_classes must be an object"));
+                    return Err(Error::invalid("net_classes must be a JSON object."));
                 };
                 for (name, c) in src {
                     dst.insert(name.clone(), c.clone());
@@ -174,7 +182,7 @@ impl Project {
             } else if obj.contains_key(&k) || k == "preset" {
                 obj.insert(k, v);
             } else {
-                return Err(Error::invalid(format!("unknown rule `{k}`")));
+                return Err(Error::invalid(format!("The rule `{k}` is unknown.")));
             }
         }
         let rules: Rules =
@@ -186,13 +194,11 @@ impl Project {
             ("via_drill", rules.via_drill),
         ] {
             if !(v.is_finite() && v > 0.0) {
-                return Err(Error::invalid(format!("{name} must be positive")));
+                return Err(Error::invalid(format!("{name} must be more than 0.")));
             }
         }
         if rules.via_drill >= rules.via_diameter {
-            return Err(Error::invalid(
-                "via_drill must be smaller than via_diameter",
-            ));
+            return Err(Error::invalid("via_drill must be less than via_diameter."));
         }
         d.board.rules = rules;
         self.commit(d, Touched::file(FileKind::Board), p.strict, "rules updated")
@@ -201,7 +207,7 @@ impl Project {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct UseFabPreset {
-    /// `jlcpcb-2layer`, `jlcpcb-4layer` or `relaxed`.
+    /// The name of the preset: `jlcpcb-2layer`, `jlcpcb-4layer` or `relaxed`.
     pub name: String,
     #[serde(default)]
     pub strict: bool,
@@ -215,7 +221,7 @@ impl Project {
                 .map(|x| x.name)
                 .collect();
             Error::invalid(format!(
-                "unknown preset `{}`; use one of {}",
+                "The preset `{}` is unknown. Use one of these presets: {}.",
                 p.name,
                 names.join(", ")
             ))

@@ -1,5 +1,5 @@
-//! Rendering: CPU rasterizer for 2D snapshots and textures, wgpu for 3D
-//! and the live viewer.
+//! Rendering: a CPU rasterizer for 2D snapshots and textures, and wgpu for
+//! 3D and the live viewer.
 
 pub mod gpu;
 pub mod raster;
@@ -21,7 +21,7 @@ pub enum Snapshot {
     View3D { yaw: f32, pitch: f32 },
 }
 
-/// Render a PNG. 2D views work without a GPU; 3D needs one.
+/// Render a PNG. 2D views work without a GPU. 3D views need a GPU.
 pub fn snapshot(
     s2: &Scene2D,
     s3: &Scene3D,
@@ -38,11 +38,13 @@ pub fn snapshot(
                 layers: None,
                 region: None,
             };
-            let pm = raster::render_layers(s2, opts2d.unwrap_or(&def)).ok_or("bad image size")?;
+            let pm = raster::render_layers(s2, opts2d.unwrap_or(&def))
+                .ok_or("the image size is not valid")?;
             Ok((raster::png(&pm)?, Vec::new()))
         }
         Snapshot::Side(side) => {
-            let pm = raster::render_side(s2, side, width, height).ok_or("bad image size")?;
+            let pm = raster::render_side(s2, side, width, height)
+                .ok_or("the image size is not valid")?;
             Ok((raster::png(&pm)?, Vec::new()))
         }
         Snapshot::View3D { yaw, pitch } => {
@@ -56,12 +58,13 @@ pub fn snapshot(
             let t = gpu.target(width, height);
             gpu.draw_3d(&t, &scene, &cam);
             let rgba = gpu.read_rgba(&t)?;
-            let mut pm = tiny_skia::Pixmap::new(width, height).ok_or("bad image size")?;
+            let mut pm =
+                tiny_skia::Pixmap::new(width, height).ok_or("the image size is not valid")?;
             pm.data_mut().copy_from_slice(&rgba);
             let problems = scene
                 .problems
                 .iter()
-                .map(|(r, e)| format!("{r}: model not loaded: {e}"))
+                .map(|(r, e)| format!("{r}: the model did not load: {e}"))
                 .collect();
             Ok((raster::png(&pm)?, problems))
         }

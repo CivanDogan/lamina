@@ -1,4 +1,4 @@
-//! An open project and the commit step every operation goes through.
+//! An open project, and the commit step that all operations use.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -10,26 +10,26 @@ use serde::Serialize;
 
 use crate::lock::Lock;
 
-/// What an operation did. Returned as JSON to the agent.
+/// What an operation did. The agent gets this as JSON.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct OpResult {
     pub summary: String,
-    /// Files written.
+    /// The files that the operation wrote.
     pub changed: Vec<String>,
-    /// Violations this change introduced.
+    /// The violations that this change added.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub new_violations: Vec<Violation>,
-    /// Violations this change fixed (rule and items only).
+    /// The violations that this change corrected (only the rule and the items).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub fixed: Vec<String>,
-    /// Total errors and warnings now on the board.
+    /// The total number of errors and warnings on the board now.
     pub errors: usize,
     pub warnings: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
 }
 
-/// Files touched by a change.
+/// The files that a change modifies.
 #[derive(Debug, Default, Clone)]
 pub struct Touched {
     pub files: BTreeSet<FileKind>,
@@ -64,8 +64,8 @@ pub struct Project {
     source: std::sync::Arc<dyn lamina_parts::PartSource>,
     kicad: std::sync::Arc<dyn lamina_kicad::KicadSource>,
     cached: Option<Vec<Violation>>,
-    /// Size and modification time of every project file at the last
-    /// load or save, to notice edits made by someone else.
+    /// The size and the modification time of each project file at the last
+    /// load or save. They show changes that another person or process made.
     stamp: Vec<(String, u64, std::time::SystemTime)>,
     _lock: Option<Lock>,
 }
@@ -83,7 +83,7 @@ impl Project {
     pub fn create(dir: &Path, name: &str) -> Result<Project> {
         if ProjectData::is_project(dir) {
             return Err(Error::invalid(format!(
-                "{} already contains a project",
+                "{} already contains a project. Open it, or use a different folder.",
                 dir.display()
             )));
         }
@@ -111,7 +111,7 @@ impl Project {
         })
     }
 
-    /// Open a project and take its lock, so no second engine writes it.
+    /// Open a project and get its lock, so that no other engine can write to it.
     pub fn open(dir: &Path) -> Result<Project> {
         let lock = Lock::acquire(dir)?;
         let mut p = Project::open_shared(dir)?;
@@ -119,8 +119,8 @@ impl Project {
         Ok(p)
     }
 
-    /// Open without taking the lock. The viewer edits this way next to an
-    /// agent; both sides call [`Project::sync`] before each change.
+    /// Open the project, but do not get the lock. The viewer uses this to edit
+    /// at the same time as an agent. Both call [`Project::sync`] before each change.
     pub fn open_shared(dir: &Path) -> Result<Project> {
         lamina_build::ensure_built(dir)?;
         let stamp = disk_stamp(dir);
@@ -137,8 +137,8 @@ impl Project {
         })
     }
 
-    /// Reload when the files changed on disk since the last load or save.
-    /// Returns whether anything was reloaded.
+    /// Reload if the files on disk changed after the last load or save.
+    /// Returns true if something was reloaded.
     pub fn sync(&mut self) -> Result<bool> {
         let built = lamina_build::ensure_built(&self.root)?.is_some();
         let now = disk_stamp(&self.root);
@@ -155,7 +155,7 @@ impl Project {
         &self.root
     }
 
-    /// Where part searches and imports go (HTTP by default).
+    /// The source for part searches and imports (HTTP by default).
     pub fn source(&self) -> &dyn lamina_parts::PartSource {
         self.source.as_ref()
     }
@@ -164,8 +164,8 @@ impl Project {
         self.source = s;
     }
 
-    /// Where KiCad footprints and models are fetched from (the official
-    /// libraries online by default).
+    /// The source of KiCad footprints and models (by default, the official
+    /// online libraries).
     pub fn kicad_source(&self) -> &dyn lamina_kicad::KicadSource {
         self.kicad.as_ref()
     }
@@ -174,13 +174,13 @@ impl Project {
         self.kicad = s;
     }
 
-    /// Add a checker that runs after every change (DRC registers here).
+    /// Add a checker that runs after each change (DRC adds its checker here).
     pub fn add_checker(&mut self, c: Checker) {
         self.cached = None;
         self.checkers.push(c);
     }
 
-    /// All current violations.
+    /// All the violations that are on the board now.
     pub fn check(&self) -> Vec<Violation> {
         self.check_data(&self.data)
     }
@@ -194,7 +194,7 @@ impl Project {
         v
     }
 
-    /// Violations of the current state, cached between changes.
+    /// The violations of the state now, kept in the cache between changes.
     fn current_violations(&mut self) -> Vec<Violation> {
         if let Some(v) = &self.cached {
             return v.clone();
@@ -204,7 +204,7 @@ impl Project {
         v
     }
 
-    /// Re-read everything from disk (for example after the user edited files).
+    /// Read all data from disk again (for example, after the user edited files).
     pub fn reload(&mut self) -> Result<()> {
         lamina_build::ensure_built(&self.root)?;
         self.stamp = disk_stamp(&self.root);
@@ -213,8 +213,8 @@ impl Project {
         Ok(())
     }
 
-    /// Apply `new` as the project state, write the touched files and
-    /// report. With `strict`, refuse when the change adds an error.
+    /// Make `new` the project state, write the changed files and return a
+    /// report. If `strict` is true, refuse the change if it adds an error.
     pub fn commit(
         &mut self,
         new: ProjectData,
@@ -243,7 +243,7 @@ impl Project {
                     .map(|v| format!("{}: {}", v.rule, v.message))
                     .collect();
                 return Err(Error::Refused(format!(
-                    "strict: change would add {} error(s): {}",
+                    "strict: The change adds {} error(s), so it was not applied: {}",
                     errs.len(),
                     list.join("; ")
                 )));
@@ -258,7 +258,8 @@ impl Project {
             .collect();
         if !clash.is_empty() {
             return Err(Error::Refused(format!(
-                "{} {} generated from {}; change the source instead, it is rebuilt automatically",
+                "{} {} generated from {}. Change the source instead. \
+                 Lamina rebuilds the files automatically.",
                 clash.join(" and "),
                 if clash.len() == 1 { "is" } else { "are" },
                 lamina_build::SOURCE_FILE
@@ -308,8 +309,8 @@ impl Project {
         Ok(r)
     }
 
-    /// Write a starter `design.jsonnet` for a new board (when none exists)
-    /// and build it.
+    /// Write a starter `design.jsonnet` for a new board (if there is no source
+    /// file) and build it.
     pub fn init_source(&mut self) -> Result<lamina_build::Report> {
         let src = lamina_build::source_path(&self.root);
         if !src.is_file() {
@@ -321,19 +322,19 @@ impl Project {
         self.build()
     }
 
-    /// Files generated from the design source, which direct edits may not touch.
+    /// The files that the design source generates. Direct edits must not change them.
     pub fn source_owned(&self) -> BTreeSet<FileKind> {
         lamina_build::owned(&self.root)
     }
 
-    /// Make `new` the project state, writing only the files that differ.
+    /// Make `new` the project state. Write only the files that are different.
     pub fn apply(&mut self, new: ProjectData, summary: impl Into<String>) -> Result<OpResult> {
         let touched = touched_between(&self.data, &new);
         self.commit(new, touched, false, summary)
     }
 }
 
-/// Files that differ between two states.
+/// The files that are different between two states.
 pub fn touched_between(a: &ProjectData, b: &ProjectData) -> Touched {
     let mut t = Touched::default();
     if a.board != b.board {
@@ -389,7 +390,7 @@ fn disk_stamp(root: &Path) -> Vec<(String, u64, std::time::SystemTime)> {
     out
 }
 
-/// Next free id like `t12` given existing ids with the same prefix.
+/// The next free id (for example `t12`) after the ids that have the same prefix.
 pub fn next_id<'a>(prefix: &str, existing: impl IntoIterator<Item = &'a str>) -> String {
     let max = existing
         .into_iter()

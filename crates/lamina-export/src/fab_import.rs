@@ -1,6 +1,6 @@
-//! A board from fab outputs (Gerbers and drill files) of any CAD program.
-//! The result is artwork: outline, holes, copper and silkscreen as
-//! drawings, with no parts or nets, for viewing and checking.
+//! Make a board from the fab outputs (Gerbers and drill files) of any CAD program.
+//! The result is artwork: the outline, holes, copper and silkscreen as drawings,
+//! with no parts or nets. Use it to look at a board and to check it.
 
 use std::collections::BTreeMap;
 
@@ -9,10 +9,10 @@ use lamina_model::*;
 
 use crate::gerber_in::{self, DrillHit};
 
-/// What a fab file holds.
+/// What a fab file contains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FabLayer {
-    /// Copper by position from the top (1 = top), with `bottom` set for the last.
+    /// Copper, by position from the top (1 = top). `bottom` is set for the last layer.
     Copper {
         pos: u8,
         bottom: bool,
@@ -29,7 +29,7 @@ fn r6(v: f64) -> f64 {
     json::round6(v)
 }
 
-/// Layer of a file from its X2 file function, then its name.
+/// Find the layer of a file from its X2 file function. If it has none, use its name.
 pub fn classify(name: &str, text: &str) -> FabLayer {
     let head: String = text.chars().take(4000).collect();
     if head.contains("M48")
@@ -74,7 +74,7 @@ pub fn classify(name: &str, text: &str) -> FabLayer {
     let base = lower.rsplit(['/', '\\']).next().unwrap_or(&lower);
     let ext = base.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
     let has = |s: &str| base.contains(s);
-    // KiCad names first, then Protel/Altium/EasyEDA extensions, then Eagle.
+    // Try KiCad names first, then Protel/Altium/EasyEDA extensions, then Eagle.
     if has("f_cu") || has("f.cu") {
         return FabLayer::Copper {
             pos: 1,
@@ -88,7 +88,7 @@ pub fn classify(name: &str, text: &str) -> FabLayer {
         };
     }
     if has("_cu") || has(".cu") {
-        // `In2_Cu`: the inner layer number sits between "in" and "_cu".
+        // `In2_Cu`: the inner layer number is between "in" and "_cu".
         for (i, _) in base.match_indices("in") {
             let n: String = base[i + 2..]
                 .chars()
@@ -144,14 +144,14 @@ pub fn classify(name: &str, text: &str) -> FabLayer {
         "gbp" | "crs" => FabLayer::Paste(Side::Bottom),
         "gko" | "gm1" | "gml" | "gm" | "dim" | "mil" | "gbr_outline" => FabLayer::Outline,
         "drl" | "xln" | "exc" | "drd" => FabLayer::Drill,
-        // Generic extensions count as drill files only when they look like one.
+        // A file with a generic extension is a drill file only if its contents look like one.
         "txt" | "nc" | "tap"
             if head.contains("METRIC") || head.contains("INCH") || head.contains("T1") =>
         {
             FabLayer::Drill
         }
         e if e.starts_with('g') && e[1..].parse::<u8>().is_ok() => {
-            // .G1, .G2 ... inner layers (Protel).
+            // .G1, .G2 and more: inner layers (Protel).
             FabLayer::Copper {
                 pos: e[1..].parse::<u8>().unwrap() + 1,
                 bottom: false,
@@ -165,8 +165,8 @@ pub fn classify(name: &str, text: &str) -> FabLayer {
     }
 }
 
-/// A polygon with holes as one ring: each hole is joined to the outside by
-/// a zero-width cut, the way Gerber regions do it.
+/// Make one ring from a polygon with holes. A zero-width cut connects each
+/// hole to the outside, as in Gerber regions.
 pub fn keyhole(p: &Polygon<f64>) -> Vec<Point> {
     let pts = |ls: &geo::LineString<f64>| -> Vec<Point> {
         let mut v: Vec<Point> = ls.coords().map(|c| Point::new(r6(c.x), r6(c.y))).collect();
@@ -175,7 +175,7 @@ pub fn keyhole(p: &Polygon<f64>) -> Vec<Point> {
         }
         v
     };
-    // Outer ring counter-clockwise, holes clockwise, so the cuts subtract.
+    // The outer ring is counter-clockwise and the holes are clockwise, so the cuts subtract.
     let mut outer = pts(p.exterior());
     if lamina_geom::prim::ring_area(&outer) < 0.0 {
         outer.reverse();
@@ -192,7 +192,7 @@ pub fn keyhole(p: &Polygon<f64>) -> Vec<Point> {
             h
         })
         .collect();
-    // Rightmost holes first, so their cuts do not cross the others'.
+    // Do the rightmost holes first, so that their cuts do not cross the cuts of other holes.
     holes.sort_by(|a, b| {
         let mx = |h: &Vec<Point>| h.iter().map(|q| q.x).fold(f64::MIN, f64::max);
         mx(b).total_cmp(&mx(a))
@@ -204,7 +204,7 @@ pub fn keyhole(p: &Polygon<f64>) -> Vec<Point> {
             .max_by(|a, b| a.1.x.total_cmp(&b.1.x))
             .map(|(i, q)| (i, *q))
             .unwrap();
-        // Nearest outer vertex reachable without crossing an edge.
+        // Find the nearest outer vertex. The cut to it must not cross an edge.
         let mut order: Vec<usize> = (0..outer.len()).collect();
         order.sort_by(|&a, &b| outer[a].dist(hp).total_cmp(&outer[b].dist(hp)));
         let clear = |oi: usize, outer: &[Point]| -> bool {
@@ -240,12 +240,12 @@ pub fn keyhole(p: &Polygon<f64>) -> Vec<Point> {
     outer
 }
 
-/// Result of reading a set of fab files.
+/// The board that `import` makes from a set of fab files.
 #[derive(Debug)]
 pub struct FabBoard {
     pub data: ProjectData,
     pub notes: Vec<String>,
-    /// File name to the layer it was read as.
+    /// The layer of each file, as `import` read it.
     pub layers: BTreeMap<String, String>,
 }
 
@@ -325,7 +325,7 @@ pub fn import(files: &[(String, Vec<u8>)], name: &str) -> Result<FabBoard, Strin
         }
     }
     if copper.is_empty() && edges.is_empty() {
-        return Err("no copper or outline Gerber among the files".into());
+        return Err("There is no copper or outline Gerber in the files".into());
     }
     let skipped: Vec<&String> = layers
         .iter()
@@ -334,7 +334,7 @@ pub fn import(files: &[(String, Vec<u8>)], name: &str) -> Result<FabBoard, Strin
         .collect();
     if !skipped.is_empty() {
         notes.push(format!(
-            "not imported (mask and paste come from pads, which artwork has none of): {}",
+            "Not imported, because mask and paste come from pads and artwork has no pads: {}",
             skipped
                 .iter()
                 .map(|s| s.as_str())
@@ -389,9 +389,9 @@ pub fn import(files: &[(String, Vec<u8>)], name: &str) -> Result<FabBoard, Strin
         }
     }
 
-    // Outline from the drawn centre lines; the image is a fallback. Hand
-    // drawn outlines often miss by a fraction of a millimetre, so a tolerant
-    // pass is tried too and kept when it finds a larger board.
+    // Make the outline from the drawn centre lines. If that fails, use the image.
+    // Hand-drawn outlines often have gaps of less than 1 mm, so also try a larger
+    // tolerance. Keep that result if it finds a larger board.
     let largest = |loops: &[Contour]| {
         loops
             .iter()
@@ -403,16 +403,18 @@ pub fn import(files: &[(String, Vec<u8>)], name: &str) -> Result<FabBoard, Strin
     if open > 0 || loops.is_empty() {
         let (wide, wide_open) = chain_edges(edges, 0.5);
         if largest(&wide) > largest(&loops) * 1.01 {
-            notes.push("the outline had small gaps (under 0.5 mm); they were closed".into());
+            notes.push(
+                "The outline had small gaps (less than 0.5 mm), and Lamina closed them".into(),
+            );
             loops = wide;
             if wide_open > 0 {
                 notes.push(format!(
-                    "{wide_open} outline segment(s) not part of a closed loop were ignored"
+                    "Lamina ignored {wide_open} outline segment(s) that are not part of a closed loop"
                 ));
             }
         } else if open > 0 {
             notes.push(format!(
-                "{open} outline segment(s) not part of a closed loop were ignored"
+                "Lamina ignored {open} outline segment(s) that are not part of a closed loop"
             ));
         }
     }
@@ -426,23 +428,25 @@ pub fn import(files: &[(String, Vec<u8>)], name: &str) -> Result<FabBoard, Strin
             .max_by(|a, b| a.unsigned_area().total_cmp(&b.unsigned_area()))
             .cloned()
     }) {
-        // A filled outline layer: its outside boundary is the board.
+        // The outline layer is filled. Its outside boundary is the board.
         let pts: Vec<Point> = img
             .exterior()
             .coords()
             .map(|c| Point::new(r6(c.x), r6(c.y)))
             .collect();
         d.board.outline = contour_from_points(pts);
-        notes.push("board outline taken from the outline layer's filled shape".into());
+        notes.push("The board outline comes from the filled shape on the outline layer".into());
     } else {
         if let Some(r) = Rect::from_points(d.routing.graphics.iter().flat_map(|g| g.shape.points()))
         {
             d.board.outline = Some(Contour::rect(r.min.x, r.min.y, r.width(), r.height()));
-            notes.push("no board outline found; using the copper's bounding box".into());
+            notes.push(
+                "There is no board outline, so Lamina uses the bounding box of the copper".into(),
+            );
         }
     }
 
-    // Holes. Eagle and others cut slots as rows of overlapping drill hits.
+    // Holes. Eagle and other programs make slots as rows of drill hits that overlap.
     let drills = merge_slot_hits(drills);
     let mut hid = 0;
     let mut unknown_plating = 0;
@@ -484,7 +488,7 @@ pub fn import(files: &[(String, Vec<u8>)], name: &str) -> Result<FabBoard, Strin
     }
     if unknown_plating > 0 {
         notes.push(format!(
-            "{unknown_plating} hole(s) with no plating information were taken as plated"
+            "{unknown_plating} hole(s) have no plating data, so Lamina made them plated"
         ));
     }
     if let Some(b) = d.board.outline.as_ref().and_then(|o| o.bbox()) {
@@ -492,14 +496,14 @@ pub fn import(files: &[(String, Vec<u8>)], name: &str) -> Result<FabBoard, Strin
             d.translate(-b.min.x, -b.min.y);
         }
     }
-    // Artwork has no nets; keep the rules from flagging what the fab files contain.
+    // Artwork has no nets. Change the rules so that they do not flag what the fab files contain.
     let r = &mut d.board.rules;
     for h in &d.board.holes {
         r.min_drill = r.min_drill.min(h.drill.min_size());
     }
     r.hole_to_hole = r.hole_to_hole.min(0.1);
     notes.push(format!(
-        "{} copper layer(s), {} drawings, {} holes; artwork only (no parts or nets)",
+        "{} copper layer(s), {} drawings and {} holes, as artwork only (no parts or nets)",
         copper.len(),
         d.routing.graphics.len(),
         d.board.holes.len()
@@ -511,7 +515,7 @@ pub fn import(files: &[(String, Vec<u8>)], name: &str) -> Result<FabBoard, Strin
     })
 }
 
-/// Join runs of overlapping, same-size round hits in a straight line into slots.
+/// Change each row of round hits that overlap, have the same size and are on a line into a slot.
 fn merge_slot_hits(hits: Vec<DrillHit>) -> Vec<DrillHit> {
     let mut out: Vec<DrillHit> = Vec::new();
     for h in hits {
@@ -539,7 +543,7 @@ fn merge_slot_hits(hits: Vec<DrillHit>) -> Vec<DrillHit> {
     out
 }
 
-/// Files of a folder or a zip archive.
+/// Read the files of a folder or a zip archive.
 pub fn read_files(path: &std::path::Path) -> Result<Vec<(String, Vec<u8>)>, String> {
     let mut out = Vec::new();
     if path.is_dir() {

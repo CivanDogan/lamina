@@ -1,5 +1,5 @@
-//! Copper geometry for Lamina: primitives, exact distances, board item
-//! extraction and a spatial index.
+//! Copper geometry for Lamina: primitives, exact distances, extraction of
+//! board items, and a spatial index.
 
 pub mod board;
 pub mod fill;
@@ -26,7 +26,7 @@ impl RTreeObject for Entry {
     }
 }
 
-/// Bounding-box index over a list of rectangles.
+/// A bounding-box index for a list of rectangles.
 pub struct Index {
     tree: RTree<Entry>,
 }
@@ -46,7 +46,7 @@ impl Index {
         }
     }
 
-    /// Indices whose boxes come within `margin` of `r`.
+    /// The indices of the boxes that come within `margin` of `r`.
     pub fn near(&self, r: &Rect, margin: f64) -> impl Iterator<Item = usize> + '_ {
         let env = AABB::from_corners(
             [r.min.x - margin, r.min.y - margin],

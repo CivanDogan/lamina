@@ -1,6 +1,6 @@
-//! Specctra DSN export and SES import, the interchange an external
-//! autorouter such as Freerouting speaks. Coordinates are micrometres
-//! with Y up, which matches Lamina's frame.
+//! Specctra DSN export and SES import. An external autorouter, for example
+//! Freerouting, uses these files. Coordinates are in micrometres with Y up,
+//! the same as the Lamina frame.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,12 +12,12 @@ fn r6(v: f64) -> f64 {
     json::round6(v)
 }
 
-/// Millimetres to the DSN's micrometres.
+/// Convert millimetres to the micrometres of the DSN.
 fn um(v: f64) -> f64 {
     (v * 1000.0 * 10.0).round() / 10.0
 }
 
-/// Padstack name for a pad; `[T]` top only, `[A]` all layers.
+/// The padstack name for a pad. `[T]` is top only, `[A]` is all layers.
 fn padstack_name(pad: &Pad, through: bool) -> String {
     let side = if through { "A" } else { "T" };
     let (w, h) = pad.shape.size();
@@ -48,7 +48,7 @@ fn via_name(diameter: f64, drill: f64) -> String {
     format!("Via[0-1]_{}:{}_um", um(diameter), um(drill))
 }
 
-/// Sizes from a `Via[0-1]_600:300_um` name.
+/// Get the sizes from a `Via[0-1]_600:300_um` name.
 pub fn via_sizes(name: &str) -> Option<(f64, f64)> {
     let body = name.split('_').nth(1)?;
     let (d, dr) = body.split_once(':')?;
@@ -58,7 +58,7 @@ pub fn via_sizes(name: &str) -> Option<(f64, f64)> {
     ))
 }
 
-/// Pad outline in pad-local coordinates (unrotated), µm, as a DSN shape.
+/// The pad outline as a DSN shape, in pad-local coordinates (not rotated), in µm.
 fn pad_shape_node(pad: &Pad, layer: &str) -> Node {
     match &pad.shape {
         PadShape::Circle { diameter } => n("circle").sym(layer).num(um(*diameter)),
@@ -69,7 +69,7 @@ fn pad_shape_node(pad: &Pad, layer: &str) -> Node {
             um(height / 2.0),
         ]),
         PadShape::Oval { width, height } => {
-            // A path of the smaller dimension's width between the two end centres.
+            // A path between the two end centres. Its width is the smaller dimension.
             if width >= height {
                 let dx = (width - height) / 2.0;
                 n("path")
@@ -119,8 +119,8 @@ fn pad_shape_node(pad: &Pad, layer: &str) -> Node {
     }
 }
 
-/// Export the board as a Specctra DSN. Existing tracks and vias go out as
-/// protected wiring unless `reroute_all`.
+/// Export the board as a Specctra DSN. If `reroute_all` is false, the existing
+/// tracks and vias go out as protected wiring.
 pub fn export_dsn(d: &ProjectData, name: &str, reroute_all: bool) -> String {
     let copper = d.board.stackup.copper_layers;
     let layers = Layer::all_copper(copper);
@@ -168,7 +168,7 @@ pub fn export_dsn(d: &ProjectData, name: &str, reroute_all: bool) -> String {
             structure = structure.child(n(kind).str(&k.id).child(poly));
         }
     }
-    // Via padstacks: the default plus any class-specific size.
+    // Via padstacks: the default size and each size that a net class sets.
     let mut vias: BTreeSet<(u64, u64)> = BTreeSet::new();
     let key = |d: f64, dr: f64| ((d * 1e6) as u64, (dr * 1e6) as u64);
     vias.insert(key(rules.via_diameter, rules.via_drill));
@@ -186,8 +186,8 @@ pub fn export_dsn(d: &ProjectData, name: &str, reroute_all: bool) -> String {
     for (dia, dr) in &via_list {
         via_node = via_node.str(via_name(*dia, *dr));
     }
-    // Routers know copper clearance, not hole spacing: ask for enough
-    // copper gap between vias (and vias and pins) to keep holes apart.
+    // Routers know copper clearance, but not hole spacing, so ask for a
+    // copper gap between vias (and vias and pins) that keeps holes apart.
     let via_gap = rules.clearance.max(rules.hole_to_hole - ring);
     structure = structure.child(via_node).child(
         n("rule")
@@ -264,8 +264,8 @@ pub fn export_dsn(d: &ProjectData, name: &str, reroute_all: bool) -> String {
         for pad in &fp.pads {
             let through = matches!(pad.kind, PadKind::Through { .. });
             if matches!(pad.kind, PadKind::Through { plated: false, .. }) {
-                // An unplated hole keeps routes away like a keepout, wide
-                // enough that a via next to it still meets hole-to-hole.
+                // An unplated hole keeps routes away like a keepout. The keepout is
+                // wide enough that a via next to it still meets hole-to-hole.
                 let d_hole = match pad.kind {
                     PadKind::Through { drill, .. } => drill.min_size(),
                     _ => 0.0,
@@ -355,7 +355,7 @@ pub fn export_dsn(d: &ProjectData, name: &str, reroute_all: bool) -> String {
         );
     }
 
-    // Existing wiring, kept as is.
+    // The existing wiring. Keep it as it is.
     let mut wiring = n("wiring");
     if !reroute_all {
         for t in &d.routing.tracks {
@@ -407,28 +407,28 @@ pub fn export_dsn(d: &ProjectData, name: &str, reroute_all: bool) -> String {
     sexpr::write(&root.done())
 }
 
-/// Routes read from a session file.
+/// The routes from a session file.
 #[derive(Debug, Default)]
 pub struct Session {
     pub tracks: Vec<Track>,
     pub vias: Vec<Via>,
-    /// Nets the session has routes for.
+    /// The nets that have routes in the session.
     pub nets: BTreeSet<String>,
     pub notes: Vec<String>,
 }
 
-/// Read a Specctra session (`.ses`) as written by Freerouting.
+/// Read a Specctra session (`.ses`) that Freerouting wrote.
 pub fn import_ses(src: &str, d: &ProjectData) -> Result<Session, String> {
     let root = sexpr::parse(src)?;
     if !root.is("session") {
         return Err(format!(
-            "not a Specctra session (starts with `{}`)",
+            "this is not a Specctra session (it starts with `{}`)",
             root.name().unwrap_or("?")
         ));
     }
     let routes = root
         .child("routes")
-        .ok_or("session has no routes section")?;
+        .ok_or("the session has no routes section")?;
     // Values are in `unit` divided by `resolution`.
     let unit = routes
         .child("resolution")
@@ -451,7 +451,7 @@ pub fn import_ses(src: &str, d: &ProjectData) -> Result<Session, String> {
         })
     };
     let copper = d.board.stackup.copper_layers;
-    // Via padstacks defined in the session, by name.
+    // The via padstacks that the session defines, by name.
     let mut via_defs: BTreeMap<String, f64> = BTreeMap::new();
     if let Some(lib) = routes.child("library_out") {
         for ps in lib.children("padstack") {
@@ -476,7 +476,7 @@ pub fn import_ses(src: &str, d: &ProjectData) -> Result<Session, String> {
         let name = net.arg(0).unwrap_or("").to_string();
         if !d.nets.nets.contains_key(&name) {
             s.notes.push(format!(
-                "net {name} is not on the board; its routes were ignored"
+                "net {name} is not on the board. Its routes are not used"
             ));
             continue;
         }
@@ -487,7 +487,7 @@ pub fn import_ses(src: &str, d: &ProjectData) -> Result<Session, String> {
             };
             let Some(layer) = path.arg(0).and_then(layer_from_kicad) else {
                 s.notes.push(format!(
-                    "wire on unknown layer {}",
+                    "a wire is on an unknown layer {}",
                     path.arg(0).unwrap_or("?")
                 ));
                 continue;
@@ -698,7 +698,7 @@ mod tests {
             .children("clearance")
             .find(|c| c.child_text("type") == Some("via_via"))
             .unwrap();
-        // hole_to_hole 0.5 with a 0.6/0.3 via needs 0.2 mm of copper gap.
+        // With hole_to_hole 0.5 and a 0.6/0.3 via, the copper gap must be 0.2 mm.
         assert_eq!(via_via.arg_num(0), Some(200.0));
         let wiring = root.child("wiring").unwrap();
         assert_eq!(wiring.children("wire").count(), 1);

@@ -193,12 +193,12 @@ pub fn render_layers(s: &Scene2D, opt: &Options2D) -> Option<Pixmap> {
                 continue;
             }
         }
-        // Mask openings and paste are noisy in the technical view.
+        // Mask openings and paste make the technical view unclear.
         if opt.layers.is_none() && matches!(l.layer, SceneLayer::Mask(_) | SceneLayer::Paste(_)) {
             continue;
         }
         let c = theme::layer_color(l.layer, s.copper_layers);
-        // Draw each layer into its own pixmap so overlaps do not double up.
+        // Draw each layer into its own pixmap, so that overlaps are not drawn two times.
         let mut layer_pm = Pixmap::new(opt.width, opt.height)?;
         let opaque = [c[0], c[1], c[2], 255];
         for g in &l.items {
@@ -224,7 +224,7 @@ fn layer_items(s: &Scene2D, l: SceneLayer) -> &[Geom] {
     s.layer(l).map(|d| d.items.as_slice()).unwrap_or(&[])
 }
 
-/// How one side of the finished board looks: mask, exposed finish, silk.
+/// The appearance of one side of the finished board: mask, exposed finish, silk.
 /// Pixels outside the board are transparent.
 pub fn appearance(s: &Scene2D, side: Side, view: View, background: Option<Rgba>) -> Option<Pixmap> {
     let (w, h) = (view.width, view.height);

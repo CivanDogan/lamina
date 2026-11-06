@@ -1,5 +1,5 @@
-//! Model-level checks that run after every change. DRC adds geometric
-//! checks on top of these.
+//! Model checks that run after each change. DRC adds geometric checks to
+//! these checks.
 
 use std::collections::BTreeMap;
 
@@ -10,7 +10,10 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
     let layers = d.board.stackup.copper_layers;
 
     match &d.board.outline {
-        None => v.push(Violation::warning("no_outline", "board outline is not set")),
+        None => v.push(Violation::warning(
+            "no_outline",
+            "The board outline is not set.",
+        )),
         Some(c) => {
             if let Err(e) = c.check() {
                 v.push(Violation::error("bad_outline", e));
@@ -24,7 +27,7 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
                 Violation::error(
                     "missing_footprint",
                     format!(
-                        "{r} uses footprint `{}`, which is not in cache/footprints",
+                        "{r} uses the footprint `{}`, but this footprint is not in cache/footprints.",
                         p.footprint
                     ),
                 )
@@ -38,7 +41,7 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
             v.push(
                 Violation::error(
                     "placement_unknown_part",
-                    format!("placement for unknown part {r}"),
+                    format!("The placement {r} is for a part that does not exist."),
                 )
                 .items([r.clone()]),
             );
@@ -52,7 +55,7 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
                 v.push(
                     Violation::warning(
                         "unknown_net_class",
-                        format!("net {name} uses undefined class `{c}`"),
+                        format!("The net {name} uses the net class `{c}`, which is not defined."),
                     )
                     .items([name.clone()]),
                 );
@@ -64,7 +67,7 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
                     v.push(
                         Violation::error(
                             "pad_in_two_nets",
-                            format!("{p} is in nets {other} and {name}"),
+                            format!("{p} is in two nets: {other} and {name}."),
                         )
                         .items([
                             p.to_string(),
@@ -78,7 +81,7 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
                 None => v.push(
                     Violation::warning(
                         "unresolved_pad",
-                        format!("{p}: part {} does not exist yet", p.part),
+                        format!("{p}: the part {} does not exist yet.", p.part),
                     )
                     .items([p.to_string()]),
                 ),
@@ -88,7 +91,10 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
                             v.push(
                                 Violation::error(
                                     "unknown_pad",
-                                    format!("{p}: footprint `{}` has no pad `{}`", fp.id, p.pad),
+                                    format!(
+                                        "{p}: the footprint `{}` has no pad `{}`.",
+                                        fp.id, p.pad
+                                    ),
                                 )
                                 .items([p.to_string()]),
                             );
@@ -105,7 +111,10 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
             v.push(
                 Violation::error(
                     "layer_not_in_stackup",
-                    format!("track {} is on {}", t.id, t.layer),
+                    format!(
+                        "The track {} is on {}, which is not a copper layer in the stackup.",
+                        t.id, t.layer
+                    ),
                 )
                 .items([t.id.clone()]),
             );
@@ -114,7 +123,7 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
             v.push(
                 Violation::error(
                     "unknown_net",
-                    format!("track {} uses unknown net {}", t.id, t.net),
+                    format!("The track {} uses the unknown net {}.", t.id, t.net),
                 )
                 .items([t.id.clone()]),
             );
@@ -124,8 +133,14 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
         for l in [via.from, via.to].into_iter().flatten() {
             if !l.is_copper() || !l.exists_in(layers) {
                 v.push(
-                    Violation::error("layer_not_in_stackup", format!("via {} spans {l}", via.id))
-                        .items([via.id.clone()]),
+                    Violation::error(
+                        "layer_not_in_stackup",
+                        format!(
+                            "The via {} goes to {l}, which is not a copper layer in the stackup.",
+                            via.id
+                        ),
+                    )
+                    .items([via.id.clone()]),
                 );
             }
         }
@@ -133,7 +148,7 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
             v.push(
                 Violation::error(
                     "unknown_net",
-                    format!("via {} uses unknown net {}", via.id, via.net),
+                    format!("The via {} uses the unknown net {}.", via.id, via.net),
                 )
                 .items([via.id.clone()]),
             );
@@ -143,16 +158,25 @@ pub fn validate(d: &ProjectData) -> Vec<Violation> {
         for l in &z.layers {
             if !l.is_copper() || !l.exists_in(layers) {
                 v.push(
-                    Violation::error("layer_not_in_stackup", format!("zone {} is on {l}", z.id))
-                        .items([z.id.clone()]),
+                    Violation::error(
+                        "layer_not_in_stackup",
+                        format!(
+                            "The zone {} is on {l}, which is not a copper layer in the stackup.",
+                            z.id
+                        ),
+                    )
+                    .items([z.id.clone()]),
                 );
             }
         }
         if let Some(n) = &z.net {
             if !net_exists(n) {
                 v.push(
-                    Violation::error("unknown_net", format!("zone {} uses unknown net {n}", z.id))
-                        .items([z.id.clone()]),
+                    Violation::error(
+                        "unknown_net",
+                        format!("The zone {} uses the unknown net {n}.", z.id),
+                    )
+                    .items([z.id.clone()]),
                 );
             }
         }

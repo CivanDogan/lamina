@@ -20,7 +20,7 @@ pub struct Loaded {
     pub changed: Vec<Rect>,
     /// Model files that changed on disk.
     pub models_changed: bool,
-    /// Files generated from `design.jsonnet`, which the editor leaves alone.
+    /// Files that `design.jsonnet` generates. The editor does not change them.
     pub generated: Vec<String>,
 }
 
@@ -29,7 +29,7 @@ pub enum Msg {
     Error(String),
 }
 
-/// Paths whose changes should not trigger a rebuild.
+/// Paths whose changes do not start a rebuild.
 fn ignored(root: &Path, p: &Path) -> bool {
     let rel = p.strip_prefix(root).unwrap_or(p);
     let s = rel.to_string_lossy().replace('\\', "/");
@@ -67,7 +67,7 @@ impl Live {
         watcher
             .watch(&root, RecursiveMode::Recursive)
             .map_err(|e| format!("cannot watch {}: {e}", root.display()))?;
-        // Shared libraries: blocks, footprints and models the board imports.
+        // Shared libraries: the blocks, footprints and models that the board imports.
         if let Some(ws) = lamina_model::Workspace::find(&root) {
             for lib in ws.lib_dirs() {
                 if lib.is_dir() && !lib.starts_with(&root) {
@@ -105,7 +105,7 @@ fn worker(root: PathBuf, ev: Receiver<(bool, bool)>, tx: Sender<Msg>, wake: impl
             }
         }
         wake();
-        // Wait for a change, then let a burst of writes settle.
+        // Wait for a change. Then wait until a burst of writes stops.
         match ev.recv() {
             Ok((_, m)) => models = m,
             Err(_) => return,
@@ -121,7 +121,7 @@ fn worker(root: PathBuf, ev: Receiver<(bool, bool)>, tx: Sender<Msg>, wake: impl
 }
 
 fn build(root: &Path, prev: Option<&ProjectData>, models_changed: bool) -> Result<Loaded, String> {
-    // A changed design source is built first; its errors read like compile errors.
+    // Build a changed design source first. Its errors look like compile errors.
     lamina_build::ensure_built(root).map_err(|e| e.to_string())?;
     let generated: Vec<String> = lamina_build::owned(root)
         .iter()
@@ -132,7 +132,7 @@ fn build(root: &Path, prev: Option<&ProjectData>, models_changed: bool) -> Resul
         match ProjectData::load(root) {
             Ok(data) => {
                 let (mut analysis, s2, s3) = lamina_scene::build(&data, root);
-                // Structural checks (unknown nets, bad layers) join the DRC results.
+                // Add the structure checks (unknown nets, bad layers) to the DRC results.
                 analysis
                     .violations
                     .extend(lamina_core::validate::validate(&data));
@@ -164,8 +164,8 @@ fn grow(r: Rect, m: f64) -> Rect {
     }
 }
 
-/// Areas touched between two versions: moved parts, new or edited tracks,
-/// vias, zones and keep-outs.
+/// Areas that changed between two versions: moved parts, and new or changed
+/// tracks, vias, zones and keep-outs.
 pub fn diff(a: &ProjectData, b: &ProjectData) -> Vec<Rect> {
     let mut out = Vec::new();
     let part_box = |d: &ProjectData, r: &str| -> Option<Rect> {

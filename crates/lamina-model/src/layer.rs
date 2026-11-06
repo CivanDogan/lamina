@@ -1,5 +1,5 @@
-//! Board layers. Serialized as short strings: `top`, `in1`, `bottom`,
-//! `top.mask`, `bottom.silk`, `outline` and so on.
+//! Board layers. They are serialized as short strings: `top`, `in1`, `bottom`,
+//! `top.mask`, `bottom.silk`, `outline` and other names.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -45,7 +45,7 @@ impl Side {
     }
 }
 
-/// A copper layer. Inner layers are numbered from the top, starting at 1.
+/// A copper layer. Inner layers are numbered from the top. The first inner layer is 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Copper {
     Top,
@@ -54,7 +54,7 @@ pub enum Copper {
 }
 
 impl Copper {
-    /// Position in the stack, 0 = top.
+    /// The position in the stack. 0 is the top.
     pub fn index(self, copper_layers: u8) -> u8 {
         match self {
             Copper::Top => 0,
@@ -89,7 +89,7 @@ impl Copper {
         }
     }
 
-    /// Mirror through the board (used when a footprint is flipped).
+    /// Mirrors through the board (for a footprint that is flipped).
     pub fn flip(self, copper_layers: u8) -> Copper {
         Copper::from_index(copper_layers - 1 - self.index(copper_layers), copper_layers)
     }
@@ -133,7 +133,7 @@ impl Layer {
         }
     }
 
-    /// Whether this layer exists on a board with `copper_layers` copper layers.
+    /// True if this layer exists on a board with `copper_layers` copper layers.
     pub fn exists_in(self, copper_layers: u8) -> bool {
         match self {
             Layer::Copper(c) => c.exists_in(copper_layers),
@@ -189,19 +189,27 @@ impl FromStr for Layer {
             _ => {}
         }
         if let Some(n) = s.strip_prefix("in") {
-            let n: u8 = n.parse().map_err(|_| format!("bad inner layer `{s}`"))?;
+            let n: u8 = n
+                .parse()
+                .map_err(|_| format!("The inner layer `{s}` is not valid."))?;
             if n == 0 || n > 30 {
-                return Err(format!("inner layer number out of range in `{s}`"));
+                return Err(format!(
+                    "The inner layer number in `{s}` is out of range. Use 1 to 30."
+                ));
             }
             return Ok(Layer::Copper(Copper::Inner(n)));
         }
         let (side, kind) = s
             .split_once('.')
-            .ok_or_else(|| format!("unknown layer `{s}`"))?;
+            .ok_or_else(|| format!("The layer `{s}` is unknown."))?;
         let side = match side {
             "top" => Side::Top,
             "bottom" => Side::Bottom,
-            _ => return Err(format!("unknown layer side in `{s}`")),
+            _ => {
+                return Err(format!(
+                    "The layer side in `{s}` is unknown. Use `top` or `bottom`."
+                ));
+            }
         };
         Ok(match kind {
             "mask" => Layer::Mask(side),
@@ -209,7 +217,7 @@ impl FromStr for Layer {
             "silk" => Layer::Silk(side),
             "courtyard" => Layer::Courtyard(side),
             "fab" => Layer::Fab(side),
-            _ => return Err(format!("unknown layer kind in `{s}`")),
+            _ => return Err(format!("The layer kind in `{s}` is unknown.")),
         })
     }
 }

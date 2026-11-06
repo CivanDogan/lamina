@@ -1,5 +1,6 @@
-//! Router benchmark on real boards: strip tracks and vias (zones stay),
-//! route again, report completion, vias, length, time and DRC errors.
+//! A router benchmark on real boards. It removes the tracks and vias (zones
+//! stay) and routes again. It reports the completion, the vias, the length,
+//! the time and the DRC errors.
 //!
 //! `cargo run --release -p lamina-route --example bench -- <project dir>...`
 
@@ -14,7 +15,7 @@ fn main() {
         let before_tracks = d.routing.tracks.len();
         d.routing.tracks.clear();
         d.routing.vias.clear();
-        // Poured nets are routed only where the pour does not reach.
+        // The router routes poured nets only where the pour does not reach.
         let todo = lamina_drc::analyze(&d).ratsnest.len();
         let opt = lamina_route::RouteOptions {
             time_limit: Some(300.0),

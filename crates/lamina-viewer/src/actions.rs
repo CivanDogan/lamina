@@ -11,14 +11,14 @@ use crate::edits::{self, Sel};
 use crate::style::*;
 use crate::{App, Xf};
 
-/// A finished background job: message and success.
+/// The result of a background job: the message and the success flag.
 pub type BgDone = (String, bool);
 
 /// Ctrl+F search over parts and nets.
 #[derive(Default)]
 pub struct Find {
     pub text: String,
-    /// Keyboard-highlighted result.
+    /// The result that the keyboard highlights.
     pub cursor: usize,
     pub just_opened: bool,
 }
@@ -37,14 +37,14 @@ impl Hit {
     }
 }
 
-/// Measure tool state: first point, and the second once fixed.
+/// The state of the measure tool: the first point, and the second point after it is set.
 #[derive(Default, Clone, Copy)]
 pub struct Measure {
     pub a: Option<Point>,
     pub b: Option<Point>,
 }
 
-/// Nets touching the given parts' pads.
+/// The nets that touch the pads of the given parts.
 fn nets_of_parts(d: &ProjectData, refs: &[String]) -> Vec<String> {
     let mut v: Vec<String> = d
         .nets
@@ -106,10 +106,10 @@ impl App {
             let _ = tx.send(f());
         });
         self.bg.push(rx);
-        self.say("Working…", true);
+        self.say("Busy…", true);
     }
 
-    /// Finished background jobs become toasts.
+    /// Show the results of finished background jobs as toasts.
     pub(crate) fn poll_bg(&mut self) {
         let mut done = Vec::new();
         self.bg.retain(|rx: &Receiver<BgDone>| match rx.try_recv() {
@@ -125,14 +125,15 @@ impl App {
         }
     }
 
-    /// Route the given nets (all unrouted ones when `None`). Connections a
-    /// pour already makes are not in the ratsnest, so poured nets only get
-    /// what the pour leaves open. Undoable like any edit.
+    /// Route the given nets. If `None`, route all unrouted nets. The ratsnest
+    /// does not include the connections that a pour makes, so a net with a pour
+    /// gets only the connections that the pour does not make. You can undo this
+    /// as any other edit.
     pub(crate) fn autoroute(&mut self, nets: Option<Vec<String>>) {
         if self.loaded.is_none() {
             return;
         }
-        self.say("Autorouting…", true);
+        self.say("Autoroute…", true);
         self.commit(move |d| {
             let opt = lamina_route::RouteOptions {
                 nets,
@@ -141,9 +142,9 @@ impl App {
             let out = lamina_route::autoroute(d, &opt)?;
             if out.tracks.is_empty() && out.vias.is_empty() {
                 return Err(if out.failed.is_empty() {
-                    "Nothing to route: every connection is made".into()
+                    "There is nothing to route. All connections are made.".into()
                 } else {
-                    format!("Could not route {} connection(s)", out.failed.len())
+                    format!("Cannot route {} connection(s)", out.failed.len())
                 });
             }
             let n = out.routed.len();
@@ -153,7 +154,7 @@ impl App {
                 format!("Autorouted {n} connection(s)")
             } else {
                 format!(
-                    "Autorouted {n} connection(s), {} left: {}",
+                    "Autorouted {n} connection(s). {} are not routed: {}",
                     out.failed.len(),
                     out.failed
                         .iter()
@@ -175,7 +176,7 @@ impl App {
             d.routing.vias.retain(|x| !hit(&x.net));
             let removed = t - d.routing.tracks.len() + v - d.routing.vias.len();
             if removed == 0 {
-                return Err("No tracks or vias to rip up".into());
+                return Err("There are no tracks or vias to rip up".into());
             }
             Ok(format!("Ripped up {removed} track(s) and via(s)"))
         });
@@ -194,9 +195,9 @@ impl App {
                     ),
                     true,
                 ),
-                // The engine's refusal speaks to agents; say what to click.
+                // The engine error is for agents. Tell the user what to click.
                 Err(e) => (
-                    format!("Export failed: {e}").replace(
+                    format!("The export failed: {e}").replace(
                         "fix them or pass force: true",
                         "fix them or use Board › Export fab files anyway",
                     ),
@@ -217,7 +218,7 @@ impl App {
             });
             match r {
                 Ok(x) => (format!("Wrote {}", x.path), true),
-                Err(e) => (format!("STEP export failed: {e}"), false),
+                Err(e) => (format!("The STEP export failed: {e}"), false),
             }
         });
     }
@@ -228,7 +229,7 @@ impl App {
                 .and_then(|p| p.export_kicad(lamina_core::ExportKicad { path: None }));
             match r {
                 Ok(x) => (format!("Wrote {}", x.path), true),
-                Err(e) => (format!("KiCad export failed: {e}"), false),
+                Err(e) => (format!("The KiCad export failed: {e}"), false),
             }
         });
     }
@@ -256,7 +257,7 @@ impl App {
             ui.set_min_width(260.0);
             if ui
                 .button(format!("Autoroute all   ({unrouted} unrouted)"))
-                .on_hover_text("Routes every open connection; nets with a pour only where the pour does not reach. Ctrl+Z undoes it.")
+                .on_hover_text("Routes all open connections. For a net with a pour, it routes only where the pour does not reach. Ctrl+Z undoes it.")
                 .clicked()
             {
                 self.autoroute(None);
@@ -272,7 +273,7 @@ impl App {
             };
             if ui
                 .add_enabled(!nets.is_empty(), egui::Button::new("Autoroute selection"))
-                .on_hover_text("Routes the nets of the selected parts or tracks")
+                .on_hover_text("Routes the nets of the selected parts or tracks.")
                 .clicked()
             {
                 self.autoroute(Some(nets.clone()));
@@ -293,7 +294,7 @@ impl App {
             ui.separator();
             if ui
                 .button("Export fab files (Gerbers, drill, BOM, CPL)")
-                .on_hover_text("Refused while the board has DRC errors")
+                .on_hover_text("This is not possible while the board has DRC errors.")
                 .clicked()
             {
                 self.export_fab(root.clone(), false);
@@ -491,7 +492,7 @@ impl App {
     fn help_panel(&mut self, ui: &mut egui::Ui, rect: ERect) {
         const KEYS: &[(&str, &str)] = &[
             ("S", "Select"),
-            ("X", "Route; V adds a via, / flips the bend"),
+            ("X", "Route. V adds a via, / flips the bend"),
             ("V", "Via tool"),
             ("Z / K / O", "Pour / keep-out / outline"),
             ("D", "Measure (click two points)"),
@@ -499,7 +500,7 @@ impl App {
             ("F", "Flip selection, or fit the view"),
             ("M", "Move selection with the pointer"),
             ("L", "Lock or unlock"),
-            ("Arrows", "Nudge by the grid"),
+            ("Arrows", "Move by one grid step"),
             ("N / Shift+N", "Grid size"),
             ("PgUp / PgDn", "Active copper layer"),
             ("Del", "Delete selection"),
@@ -554,13 +555,14 @@ impl App {
                 TEXT_2,
             );
         }
-        // F1 itself is handled with the other keys (it toggles).
+        // The code for the other keys handles F1 (it toggles this sheet).
         if ui.input(|i| i.key_pressed(egui::Key::Escape) || i.pointer.any_pressed()) {
             self.help = false;
         }
     }
 
-    /// Measure tool input: first click starts, second fixes, a third starts over.
+    /// Input for the measure tool: the first click starts, the second click sets
+    /// the end, and a third click starts again.
     pub(crate) fn measure_input(&mut self, resp: &egui::Response, p: Point) {
         let at = self.measure_snap(p);
         if resp.clicked() {
@@ -576,7 +578,7 @@ impl App {
         }
     }
 
-    /// Pad and via centres within a few pixels, else the grid.
+    /// Snap to a pad or via centre in a few pixels. If there is none, snap to the grid.
     fn measure_snap(&self, p: Point) -> Point {
         match self.magnet(p, None, None) {
             Some(m) => m.at,
@@ -597,7 +599,7 @@ impl App {
         let (sa, sb) = (xf.to_screen(a), xf.to_screen(b));
         let c = Color32::from_rgb(255, 214, 102);
         painter.line_segment([sa, sb], Stroke::new(1.5, c));
-        // dx / dy legs, dashed-looking thin lines.
+        // The dx and dy legs, as thin lines.
         let corner = xf.to_screen(Point::new(b.x, a.y));
         painter.line_segment([sa, corner], Stroke::new(1.0, c.gamma_multiply(0.45)));
         painter.line_segment([corner, sb], Stroke::new(1.0, c.gamma_multiply(0.45)));

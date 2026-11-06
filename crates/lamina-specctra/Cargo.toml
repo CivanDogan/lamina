@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Specctra DSN export and SES import, for external autorouters such as Freerouting"
+description = "Specctra DSN export and SES import, for external autorouters, for example Freerouting"
 
 [dependencies]
 lamina-model.workspace = true

@@ -1,5 +1,5 @@
-//! Where part data comes from. The public endpoints are unofficial, so
-//! everything goes through [`PartSource`] and failures are plain errors.
+//! The sources of part data. The public endpoints are not official, so all
+//! access goes through [`PartSource`] and a failure is a plain error.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PartHit {
-    /// LCSC number, e.g. `C6186`.
+    /// The LCSC number, for example `C6186`.
     pub lcsc: String,
     pub mpn: String,
     pub manufacturer: Option<String>,
@@ -17,20 +17,20 @@ pub struct PartHit {
     pub description: Option<String>,
     pub category: Option<String>,
     pub stock: u64,
-    /// Unit price in USD at quantity 1, when known.
+    /// The unit price in USD at quantity 1, if it is known.
     pub price: Option<f64>,
-    /// JLCPCB basic part (no extended-part fee).
+    /// True for a JLCPCB basic part (no extended-part fee).
     pub basic: bool,
     pub datasheet: Option<String>,
 }
 
 pub trait PartSource: Send + Sync {
     fn search(&self, query: &str, limit: usize) -> Result<Vec<PartHit>, String>;
-    /// EasyEDA component record for an LCSC number.
+    /// Gets the EasyEDA component record for an LCSC number.
     fn component(&self, lcsc: &str) -> Result<Value, String>;
-    /// EasyEDA OBJ mesh by model uuid.
+    /// Gets the EasyEDA OBJ mesh for a model uuid.
     fn model_obj(&self, uuid: &str) -> Result<String, String>;
-    /// STEP model by model uuid.
+    /// Gets the STEP model for a model uuid.
     fn model_step(&self, uuid: &str) -> Result<Vec<u8>, String>;
 }
 
@@ -117,7 +117,9 @@ impl PartSource for HttpSource {
 
     fn component(&self, lcsc: &str) -> Result<Value, String> {
         if !valid_lcsc(lcsc) {
-            return Err(format!("`{lcsc}` is not an LCSC number like C6186"));
+            return Err(format!(
+                "`{lcsc}` is not an LCSC number. Use a number like C6186."
+            ));
         }
         let text = self.get_text(&COMPONENT_URL.replace("{}", lcsc))?;
         let v: Value = serde_json::from_str(&text).map_err(|e| format!("{lcsc}: {e}"))?;
@@ -131,22 +133,22 @@ impl PartSource for HttpSource {
 
     fn model_obj(&self, uuid: &str) -> Result<String, String> {
         if !valid_uuid(uuid) {
-            return Err(format!("bad model uuid `{uuid}`"));
+            return Err(format!("the model uuid `{uuid}` is not valid"));
         }
         let t = self.get_text(&OBJ_URL.replace("{}", uuid))?;
         if !t.lines().any(|l| l.starts_with("v ")) {
-            return Err(format!("model {uuid}: response is not an OBJ mesh"));
+            return Err(format!("model {uuid}: the response is not an OBJ mesh"));
         }
         Ok(t)
     }
 
     fn model_step(&self, uuid: &str) -> Result<Vec<u8>, String> {
         if !valid_uuid(uuid) {
-            return Err(format!("bad model uuid `{uuid}`"));
+            return Err(format!("the model uuid `{uuid}` is not valid"));
         }
         let b = self.get_bytes(&STEP_URL.replace("{}", uuid))?;
         if !b.starts_with(b"ISO-10303-21") {
-            return Err(format!("model {uuid}: response is not a STEP file"));
+            return Err(format!("model {uuid}: the response is not a STEP file"));
         }
         Ok(b)
     }
@@ -155,7 +157,7 @@ impl PartSource for HttpSource {
 pub fn parse_search(v: &Value) -> Result<Vec<PartHit>, String> {
     let list = v
         .pointer("/data/componentPageInfo/list")
-        .ok_or("unexpected search response")?;
+        .ok_or("the search response has an unknown format")?;
     let Some(list) = list.as_array() else {
         return Ok(Vec::new());
     };
@@ -192,7 +194,7 @@ pub fn parse_search(v: &Value) -> Result<Vec<PartHit>, String> {
 }
 
 /// Reads recorded responses from a folder: `search-<query>.json`,
-/// `<lcsc>.json`, `<uuid>.obj`, `<uuid>.step`. Used by tests and offline work.
+/// `<lcsc>.json`, `<uuid>.obj`, `<uuid>.step`. Tests and offline work use it.
 pub struct DirSource {
     pub dir: PathBuf,
 }

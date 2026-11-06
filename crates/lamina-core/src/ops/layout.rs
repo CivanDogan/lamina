@@ -1,5 +1,5 @@
-//! Layout reuse operations: copy one block's layout onto others, and save
-//! or place block layouts as files (see `crate::reuse`).
+//! Operations to use a layout again. They copy the layout of one block to
+//! other blocks, and save or place block layouts as files (see `crate::reuse`).
 
 use std::path::PathBuf;
 
@@ -17,20 +17,23 @@ fn yes() -> bool {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct RepeatLayout {
-    /// Block whose layout is copied: a group name, or a list of refdes.
+    /// The block whose layout is copied. This is a group name or a list of refdes.
     pub from: Block,
-    /// Blocks that take the layout, each a group name or a list of refdes.
-    /// Each must have the same footprints wired the same way as `from`.
+    /// The blocks that get the layout. Each block is a group name or a list of
+    /// refdes. Each block must have the same footprints, connected in the same
+    /// way as `from`.
     pub to: Vec<Block>,
-    /// A part that stays where it is. In `from`: its counterpart stays put
-    /// in every target. In a target: that part stays. Default: the largest
-    /// part of `from`.
+    /// A part that does not move. If it is in `from`, the part that matches it
+    /// in each target does not move. If it is in a target, that part does not move.
+    /// The default is the largest part of `from`.
     #[serde(default)]
     pub anchor: Option<String>,
-    /// Put the target's anchor part here instead (one target only).
+    /// Put the anchor part of the target at this position instead (only for
+    /// one target).
     #[serde(default)]
     pub at: Option<Placement>,
-    /// Copy tracks and vias too, replacing the target's old ones (default true).
+    /// Also copy the tracks and vias. They replace the old tracks and vias of
+    /// the target (default true).
     #[serde(default = "yes")]
     pub routing: bool,
     /// Also move locked parts.
@@ -42,33 +45,36 @@ pub struct RepeatLayout {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SaveLayoutBlock {
-    /// The laid-out block: a group name, or a list of refdes.
+    /// The block to save, after you lay it out. This is a group name or a
+    /// list of refdes.
     pub from: Block,
-    /// File name without extension, e.g. `servo_channel`.
+    /// The file name without the extension, for example `servo_channel`.
     pub name: String,
-    /// Part that anchors the layout (default: the largest).
+    /// The anchor part of the layout (default: the largest part).
     #[serde(default)]
     pub anchor: Option<String>,
-    /// Overwrite an existing layout of that name.
+    /// Replace a saved layout that has the same name.
     #[serde(default)]
     pub replace: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct PlaceLayoutBlock {
-    /// Name of a saved layout (`layouts/<name>.json` in the board or a
+    /// The name of a saved layout (`layouts/<name>.json` in the board or in a
     /// workspace library).
     pub name: String,
-    /// Blocks that take the layout, each a group name or a list of refdes.
+    /// The blocks that get the layout. Each block is a group name or a list of
+    /// refdes.
     pub to: Vec<Block>,
-    /// A target part that stays where it is (default: the counterpart of
-    /// the layout's anchor).
+    /// A target part that does not move (default: the part that matches the
+    /// anchor of the layout).
     #[serde(default)]
     pub anchor: Option<String>,
-    /// Put the target's anchor part here instead (one target only).
+    /// Put the anchor part of the target at this position instead (only for
+    /// one target).
     #[serde(default)]
     pub at: Option<Placement>,
-    /// Copy tracks and vias too (default true).
+    /// Also copy the tracks and vias (default true).
     #[serde(default = "yes")]
     pub routing: bool,
     #[serde(default)]
@@ -146,7 +152,8 @@ impl Project {
         self.commit_layout(d, done, p.routing, p.strict, &what)
     }
 
-    /// Where a new saved layout goes: the first workspace library, else the board.
+    /// The folder for a new saved layout: the first workspace library, or the
+    /// board if there is no library.
     fn layout_save_dir(&self) -> PathBuf {
         let dirs = layout_dirs(self.root());
         dirs.get(1).unwrap_or(&dirs[0]).clone()
@@ -155,7 +162,7 @@ impl Project {
     pub fn save_layout_block(&self, p: SaveLayoutBlock) -> Result<LayoutSaved> {
         if !valid_id(&p.name) {
             return Err(Error::invalid(format!(
-                "bad layout name `{}`: letters, digits, . _ - only",
+                "The layout name `{}` is not valid. Use only letters, digits, `.`, `_` and `-`.",
                 p.name
             )));
         }
@@ -166,7 +173,7 @@ impl Project {
         let path = dir.join(format!("{}.json", p.name));
         if path.exists() && !p.replace {
             return Err(Error::invalid(format!(
-                "{} exists; pass replace: true to overwrite it",
+                "{} already exists. Set replace: true to replace it.",
                 path.display()
             )));
         }
@@ -185,7 +192,7 @@ impl Project {
         })
     }
 
-    /// A saved layout by name, from the board's `layouts/` or a library's.
+    /// Get a saved layout by its name, from `layouts/` in the board or in a library.
     pub fn load_layout_block(&self, name: &str) -> Result<LayoutBlock> {
         let dirs = layout_dirs(self.root());
         for d in &dirs {
@@ -208,10 +215,10 @@ impl Project {
         known.sort();
         known.dedup();
         Err(Error::invalid(if known.is_empty() {
-            format!("no saved layout `{name}`; save one with save_layout_block")
+            format!("There is no saved layout `{name}`. Save one with save_layout_block.")
         } else {
             format!(
-                "no saved layout `{name}`; saved layouts: {}",
+                "There is no saved layout `{name}`. The saved layouts are: {}.",
                 known.join(", ")
             )
         }))
@@ -224,23 +231,26 @@ impl Project {
                 .map(|b| self.block_parts(b))
                 .collect::<Result<_>>()?;
         if to.is_empty() {
-            return Err(Error::invalid("no target block given"));
+            return Err(Error::invalid(
+                "No target block is given. Give at least one block in `to`.",
+            ));
         }
         if p.at.is_some() && to.len() > 1 {
-            return Err(Error::invalid("`at` needs exactly one target"));
+            return Err(Error::invalid(
+                "If you give `at`, you must give exactly one target.",
+            ));
         }
         if let Some(a) = &p.anchor {
-            let t = to
-                .iter()
-                .find(|t| t.contains(a))
-                .ok_or_else(|| Error::invalid(format!("anchor {a} is not in a target block")))?;
+            let t = to.iter().find(|t| t.contains(a)).ok_or_else(|| {
+                Error::invalid(format!("The anchor {a} is not in a target block."))
+            })?;
             let m = reuse::match_block(&self.data, &b, t).map_err(Error::invalid)?;
             let local = m
                 .parts
                 .iter()
                 .find(|(_, r)| *r == a)
                 .map(|(k, _)| k.clone())
-                .ok_or_else(|| Error::invalid("anchor not paired"))?;
+                .ok_or_else(|| Error::invalid("No part in the layout matches the anchor."))?;
             b = b.rebase(&local).map_err(Error::invalid)?;
         }
         let o = ApplyOpts {

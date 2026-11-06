@@ -1,4 +1,4 @@
-//! Print the closed loops found in a Gerber outline layer, for debugging imports.
+//! Print the closed loops in a Gerber outline layer. Use it to debug imports.
 fn main() {
     let path = std::env::args()
         .nth(1)

@@ -22,7 +22,7 @@ struct Cli {
 enum Cmd {
     /// Run the MCP server on stdio.
     Mcp {
-        /// Open this project at startup.
+        /// Open this project when the server starts.
         #[arg(long)]
         project: Option<PathBuf>,
     },
@@ -35,35 +35,37 @@ enum Cmd {
         #[arg(long)]
         modular: bool,
     },
-    /// Build a board's design.jsonnet into its JSON files.
+    /// Build the design.jsonnet of a board into its JSON files.
     Build { dir: PathBuf },
-    /// Import a KiCad board file into a project (created when missing).
+    /// Import a KiCad board file into a project. If the project does not exist,
+    /// create it.
     ImportKicad {
         file: PathBuf,
         dir: PathBuf,
-        /// Fetch missing 3D models from the official KiCad libraries.
+        /// Download missing 3D models from the official KiCad libraries.
         #[arg(long)]
         online: bool,
-        /// Overwrite a board already in the project.
+        /// Replace a board that is already in the project.
         #[arg(long)]
         replace: bool,
     },
-    /// Import an EasyEDA PCB JSON into a project (created when missing).
+    /// Import an EasyEDA PCB JSON file into a project. If the project does not
+    /// exist, create it.
     ImportEasyeda {
         file: PathBuf,
         dir: PathBuf,
-        /// Skip fetching 3D models from EasyEDA.
+        /// Do not download 3D models from EasyEDA.
         #[arg(long)]
         no_models: bool,
-        /// Overwrite a board already in the project.
+        /// Replace a board that is already in the project.
         #[arg(long)]
         replace: bool,
     },
-    /// Import Gerber and drill files (folder or zip) into a project as artwork.
+    /// Import Gerber and drill files (a folder or a zip) into a project as artwork.
     ImportGerbers {
         path: PathBuf,
         dir: PathBuf,
-        /// Overwrite a board already in the project.
+        /// Replace a board that is already in the project.
         #[arg(long)]
         replace: bool,
     },
@@ -72,10 +74,10 @@ enum Cmd {
         dir: PathBuf,
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Drill vias through the board too.
+        /// Also drill the vias through the board.
         #[arg(long)]
         vias: bool,
-        /// Leave the part models out.
+        /// Do not include the part models.
         #[arg(long)]
         board_only: bool,
     },
@@ -84,7 +86,7 @@ enum Cmd {
         dir: PathBuf,
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Leave existing routes out.
+        /// Do not include the existing routes.
         #[arg(long)]
         reroute_all: bool,
     },
@@ -96,25 +98,26 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// Copy one block's layout onto others. A block is a group name or a
-    /// comma-separated refdes list (`D1,R1`).
+    /// Copy the layout of one block to other blocks. A block is a group name
+    /// or a list of refdes with commas between them (`D1,R1`).
     RepeatLayout {
         dir: PathBuf,
         #[arg(long)]
         from: String,
         #[arg(long, required = true)]
         to: Vec<String>,
-        /// Part that stays where it is (in the source or a target).
+        /// The part that does not move (in the source or in a target).
         #[arg(long)]
         anchor: Option<String>,
-        /// Copy placement only.
+        /// Copy only the placement.
         #[arg(long)]
         no_routing: bool,
         /// Also move locked parts.
         #[arg(long)]
         force: bool,
     },
-    /// Save a laid-out block as layouts/<name>.json (workspace library, else board).
+    /// Save the layout of a block as layouts/<name>.json (in the workspace library,
+    /// or in the board if there is no workspace).
     SaveLayout {
         dir: PathBuf,
         #[arg(long)]
@@ -126,14 +129,14 @@ enum Cmd {
         #[arg(long)]
         replace: bool,
     },
-    /// Put a saved layout onto blocks of a board.
+    /// Put a saved layout on blocks of a board.
     PlaceLayout {
         dir: PathBuf,
         #[arg(long)]
         name: String,
         #[arg(long, required = true)]
         to: Vec<String>,
-        /// Target part that stays where it is.
+        /// The target part that does not move.
         #[arg(long)]
         anchor: Option<String>,
         #[arg(long)]
@@ -147,15 +150,15 @@ enum Cmd {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Print project status as JSON.
+    /// Print the project status as JSON.
     Status { dir: PathBuf },
-    /// List violations as JSON.
+    /// List the rule violations as JSON.
     Check { dir: PathBuf },
     /// Print the JSON schema of a file kind.
     Schema { kind: String },
 }
 
-/// A block on the command line: `name` is a group, `A,B,C` a part list.
+/// A block on the command line: `name` is a group, `A,B,C` is a part list.
 fn block(s: &str) -> lamina_core::reuse::Block {
     if s.contains(',') {
         lamina_core::reuse::Block::Parts(
@@ -169,7 +172,8 @@ fn block(s: &str) -> lamina_core::reuse::Block {
     }
 }
 
-/// Hook for checkers from other crates (DRC). Called whenever a project opens.
+/// Hook for checkers from other crates (DRC). Lamina calls it each time a
+/// project opens.
 pub fn register_checkers(_p: &mut Project) {}
 
 fn main() -> anyhow::Result<()> {
@@ -401,7 +405,7 @@ fn run_mcp(project: Option<PathBuf>) -> anyhow::Result<()> {
         let service = server::Lamina::new(initial)
             .serve(rmcp::transport::stdio())
             .await
-            .context("starting MCP server")?;
+            .context("cannot start the MCP server")?;
         service.waiting().await?;
         Ok(())
     })

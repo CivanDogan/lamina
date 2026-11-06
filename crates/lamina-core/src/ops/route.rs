@@ -9,12 +9,12 @@ use crate::project::{OpResult, Project, Touched, next_id};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct RouteTrace {
-    /// Net; inferred from the first pad when omitted.
+    /// The net. If you do not give it, Lamina uses the net of the first pad.
     #[serde(default)]
     pub net: Option<String>,
-    /// Copper layer, e.g. `top` or `bottom`.
+    /// The copper layer, for example `top` or `bottom`.
     pub layer: Layer,
-    /// Width in mm (default: the net class or board rule).
+    /// The width in mm (default: the width from the net class or the board rules).
     #[serde(default)]
     pub width: Option<f64>,
     /// Points in order. Pad references (`U1.3`) snap to the pad centre.
@@ -26,7 +26,7 @@ pub struct RouteTrace {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AddVia {
     pub net: String,
-    /// Position, or a pad reference to drop the via on.
+    /// The position, or a pad reference to put the via on.
     pub at: Target,
     #[serde(default)]
     pub diameter: Option<f64>,
@@ -38,11 +38,12 @@ pub struct AddVia {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AddZone {
-    /// Net of the pour; omit for an unconnected island.
+    /// The net of the pour. If you do not give a net, the pour is an island
+    /// with no connection.
     #[serde(default)]
     pub net: Option<String>,
     pub layers: Vec<Layer>,
-    /// Outline; defaults to the board outline.
+    /// The outline. The default is the board outline.
     #[serde(default)]
     pub outline: Option<Contour>,
     #[serde(default)]
@@ -74,19 +75,19 @@ pub struct AddKeepout {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 pub struct Ripup {
-    /// Remove tracks and vias of this net.
+    /// Remove the tracks and vias of this net.
     #[serde(default)]
     pub net: Option<String>,
-    /// Remove these track or via ids.
+    /// Remove the tracks or vias that have these ids.
     #[serde(default)]
     pub ids: Option<Vec<String>>,
-    /// Only on this layer (tracks only).
+    /// Remove only on this layer (only tracks).
     #[serde(default)]
     pub layer: Option<Layer>,
-    /// Only items with a point inside this box.
+    /// Remove only the items that have a point in this box.
     #[serde(default)]
     pub region: Option<Rect>,
-    /// Remove every track and via.
+    /// Remove all tracks and vias.
     #[serde(default)]
     pub all: bool,
     #[serde(default)]
@@ -95,7 +96,7 @@ pub struct Ripup {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct DeleteItems {
-    /// Ids of tracks, vias, zones, keep-outs, texts, graphics or holes.
+    /// The ids of tracks, vias, zones, keep-outs, texts, graphics or holes.
     pub ids: Vec<String>,
     #[serde(default)]
     pub strict: bool,
@@ -127,7 +128,7 @@ pub struct AddText {
 pub struct AddHole {
     pub at: Point,
     pub diameter: f64,
-    /// Plated with a copper ring of this diameter.
+    /// If you give this, the hole is plated and has a copper ring of this diameter.
     #[serde(default)]
     pub pad_diameter: Option<f64>,
     #[serde(default)]
@@ -141,7 +142,7 @@ fn check_copper(l: Layer, layers: u8) -> Result<()> {
         Ok(())
     } else {
         Err(Error::invalid(format!(
-            "{l} is not a copper layer of this {layers}-layer board"
+            "{l} is not a copper layer of this {layers}-layer board."
         )))
     }
 }
@@ -170,7 +171,7 @@ impl Project {
         let layers = self.data.board.stackup.copper_layers;
         check_copper(p.layer, layers)?;
         if p.points.len() < 2 {
-            return Err(Error::invalid("a trace needs at least two points"));
+            return Err(Error::invalid("A trace needs at least two points."));
         }
         let li = p.layer.copper().unwrap().index(layers);
         let mut pts = Vec::new();
@@ -180,18 +181,21 @@ impl Project {
             match t {
                 Target::Point(q) => {
                     if !q.is_finite() {
-                        return Err(Error::invalid("trace point is not finite"));
+                        return Err(Error::invalid("A trace point is not a finite number."));
                     }
                     pts.push(Point::new(json::round6(q.x), json::round6(q.y)));
                 }
                 Target::Name(s) => {
                     let pr: PadRef = s.parse().map_err(|e| {
-                        Error::invalid(format!("`{s}`: {e}; trace points are pads or {{x, y}}"))
+                        Error::invalid(format!(
+                            "`{s}` is not a pad or a point. A trace point must be a pad \
+                             (`U1.3`) or {{x, y}}. Details: {e}"
+                        ))
                     })?;
                     let (c, _, ls) = self.pad_position(&pr)?;
                     if !ls.contains(&li) {
                         return Err(Error::invalid(format!(
-                            "{pr} has no copper on {}; route on its layer or add a via",
+                            "{pr} has no copper on {}. Route on the layer of the pad, or add a via.",
                             p.layer
                         )));
                     }
@@ -204,21 +208,23 @@ impl Project {
         }
         pts.dedup_by(|a, b| a.dist(*b) < 1e-9);
         if pts.len() < 2 {
-            return Err(Error::invalid("trace points collapse to a single point"));
+            return Err(Error::invalid(
+                "All trace points are at the same position. Give at least two different points.",
+            ));
         }
         let net = p
             .net
             .or(inferred)
-            .ok_or_else(|| Error::invalid("give `net`: none of the pads has a net"))?;
+            .ok_or_else(|| Error::invalid("None of the pads has a net. Give `net`."))?;
         if !self.data.nets.nets.contains_key(&net) {
-            return Err(Error::invalid(format!("no net `{net}`")));
+            return Err(Error::invalid(format!("The net `{net}` does not exist.")));
         }
         let class = self.data.nets.nets[&net].class.clone();
         let width = p
             .width
             .unwrap_or(self.data.board.rules.track_width_for(class.as_deref()));
         if !(width.is_finite() && width > 0.0) {
-            return Err(Error::invalid("width must be positive"));
+            return Err(Error::invalid("The width must be more than 0."));
         }
         let id = self.new_id("t");
         let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
@@ -244,7 +250,10 @@ impl Project {
 
     pub fn add_via(&mut self, p: AddVia) -> Result<OpResult> {
         if !self.data.nets.nets.contains_key(&p.net) {
-            return Err(Error::invalid(format!("no net `{}`", p.net)));
+            return Err(Error::invalid(format!(
+                "The net `{}` does not exist.",
+                p.net
+            )));
         }
         let at = match &p.at {
             Target::Point(q) => *q,
@@ -264,7 +273,9 @@ impl Project {
             .or(nc.via_drill)
             .unwrap_or(self.data.board.rules.via_drill);
         if !(drill > 0.0 && diameter > drill) {
-            return Err(Error::invalid("via needs 0 < drill < diameter"));
+            return Err(Error::invalid(
+                "The via drill must be more than 0 and less than the via diameter.",
+            ));
         }
         let id = self.new_id("v");
         let mut d = self.data.clone();
@@ -293,20 +304,23 @@ impl Project {
     pub fn add_zone(&mut self, p: AddZone) -> Result<OpResult> {
         let layers = self.data.board.stackup.copper_layers;
         if p.layers.is_empty() {
-            return Err(Error::invalid("give at least one layer"));
+            return Err(Error::invalid("Give at least one layer."));
         }
         for l in &p.layers {
             check_copper(*l, layers)?;
         }
         if let Some(n) = &p.net {
             if !self.data.nets.nets.contains_key(n) {
-                return Err(Error::invalid(format!("no net `{n}`")));
+                return Err(Error::invalid(format!("The net `{n}` does not exist.")));
             }
         }
         let outline = match p.outline {
             Some(c) => c,
             None => self.data.board.outline.clone().ok_or_else(|| {
-                Error::invalid("no outline given and the board outline is not set")
+                Error::invalid(
+                    "No outline is given, and the board outline is not set. \
+                     Give `outline`, or set the board outline first.",
+                )
             })?,
         };
         outline.check().map_err(Error::Invalid)?;
@@ -340,7 +354,7 @@ impl Project {
     pub fn add_keepout(&mut self, p: AddKeepout) -> Result<OpResult> {
         p.outline.check().map_err(Error::Invalid)?;
         if p.layers.is_empty() {
-            return Err(Error::invalid("give at least one layer"));
+            return Err(Error::invalid("Give at least one layer."));
         }
         let id = self.new_id("k");
         let mut d = self.data.clone();
@@ -360,7 +374,7 @@ impl Project {
 
     pub fn ripup(&mut self, p: Ripup) -> Result<OpResult> {
         if !p.all && p.net.is_none() && p.ids.is_none() && p.region.is_none() {
-            return Err(Error::invalid("give net, ids, region or all: true"));
+            return Err(Error::invalid("Give net, ids or region, or set all: true."));
         }
         let inside = |q: &Point| {
             p.region.as_ref().is_none_or(|r| {
@@ -430,7 +444,7 @@ impl Project {
         }
         if !missing.is_empty() {
             return Err(Error::invalid(format!(
-                "no items with ids: {}",
+                "No items have these ids: {}.",
                 missing.join(", ")
             )));
         }
@@ -449,7 +463,7 @@ impl Project {
             Touched::file(FileKind::Routing),
             p.strict,
             format!(
-                "routed {} connection(s) with {n_t} track(s) and {n_v} via(s); {} failed",
+                "routed {} connection(s) with {n_t} track(s) and {n_v} via(s), {} failed",
                 out.routed.len(),
                 out.failed.len()
             ),
@@ -464,7 +478,7 @@ impl Project {
 
     pub fn add_text(&mut self, p: AddText) -> Result<OpResult> {
         if p.text.trim().is_empty() {
-            return Err(Error::invalid("text is empty"));
+            return Err(Error::invalid("The text is empty. Give a text."));
         }
         let id = self.new_id("txt");
         let mut d = self.data.clone();
@@ -486,11 +500,13 @@ impl Project {
 
     pub fn add_hole(&mut self, p: AddHole) -> Result<OpResult> {
         if !p.diameter.is_finite() || p.diameter <= 0.0 {
-            return Err(Error::invalid("diameter must be positive"));
+            return Err(Error::invalid("The diameter must be more than 0."));
         }
         if let Some(pd) = p.pad_diameter {
             if pd <= p.diameter {
-                return Err(Error::invalid("pad_diameter must exceed the hole"));
+                return Err(Error::invalid(
+                    "pad_diameter must be more than the hole diameter.",
+                ));
             }
         }
         let id = self.new_id("h");
@@ -514,7 +530,7 @@ impl Project {
         )
     }
 
-    /// Missing connections as lines between pads.
+    /// The connections that are not routed, as lines between pads.
     pub fn ratsnest(&self) -> Vec<lamina_drc::Ratsnest> {
         lamina_drc::analyze(&self.data).ratsnest
     }

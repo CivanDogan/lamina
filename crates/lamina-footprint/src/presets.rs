@@ -1,4 +1,4 @@
-//! Named packages with JEDEC / manufacturer-typical dimensions.
+//! Named packages with JEDEC dimensions or dimensions that are usual for the manufacturer.
 //!
 //! Names: `R_0603`, `C_0805`, `LED_0603`, `D_SOD-123`, `SOT-23`, `SOT-23-5`,
 //! `SOT-23-6`, `SOT-223`, `SOIC-8`, `SOIC-16W`, `TSSOP-28`, `SSOP-20`,
@@ -84,11 +84,14 @@ fn lead_width_for_pitch(p: f64) -> Dim {
     }
 }
 
-/// Resolve a package name to a spec.
+/// Finds the spec for a package name.
 pub fn resolve(name: &str) -> Result<PackageSpec, String> {
     let up = name.trim();
-    let unknown =
-        || format!("unknown package `{name}`; see footprint presets in the tool description");
+    let unknown = || {
+        format!(
+            "The package `{name}` is unknown. See the footprint presets in the tool description."
+        )
+    };
 
     // Two-terminal chips.
     for (prefix, polarized) in [
@@ -212,7 +215,7 @@ pub fn resolve(name: &str) -> Result<PackageSpec, String> {
         _ => {}
     }
 
-    // SOIC / TSSOP / SSOP / MSOP with pin count.
+    // SOIC / TSSOP / SSOP / MSOP with a pin count.
     let dual = |fam: &str, rest: &str| -> Option<PackageSpec> {
         let wide = rest.ends_with('W');
         let pins: u32 = rest.trim_end_matches('W').parse().ok()?;
@@ -314,7 +317,7 @@ pub fn resolve(name: &str) -> Result<PackageSpec, String> {
             (pins / 2, 0)
         } else {
             if !pins.is_multiple_of(4) {
-                return Err(format!("QFN pin count {pins} must be a multiple of 4"));
+                return Err(format!("The QFN pin count {pins} must be a multiple of 4."));
             }
             (pins / 4, pins / 4)
         };
@@ -359,7 +362,7 @@ pub fn resolve(name: &str) -> Result<PackageSpec, String> {
             .and_then(num)
             .ok_or_else(unknown)?;
         if !pins.is_multiple_of(4) {
-            return Err(format!("QFP pin count {pins} must be a multiple of 4"));
+            return Err(format!("The QFP pin count {pins} must be a multiple of 4."));
         }
         return Ok(PackageSpec::Quad {
             pins_vertical: pins / 4,
@@ -401,7 +404,7 @@ pub fn resolve(name: &str) -> Result<PackageSpec, String> {
         } else {
             (0.65, 1.0)
         };
-        // `1x03` means 1 column of 3 pins, like the common naming.
+        // `1x03` means 1 column of 3 pins, as in the usual names.
         return Ok(PackageSpec::PinHeader {
             rows: b,
             cols: a,
@@ -440,7 +443,7 @@ pub fn resolve(name: &str) -> Result<PackageSpec, String> {
     Err(unknown())
 }
 
-/// Package name examples, shown to agents.
+/// Examples of package names. Agents see this list.
 pub const EXAMPLES: &[&str] = &[
     "R_0402",
     "R_0603",

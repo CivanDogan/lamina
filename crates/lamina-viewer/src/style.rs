@@ -80,7 +80,7 @@ pub fn install(ctx: &egui::Context) {
             .or_default()
             .insert(0, "mono".into());
     }
-    // Fall back to the proportional stack for glyphs the semibold face lacks.
+    // Use the proportional fonts for the glyphs that the semibold font does not have.
     let prop = fonts
         .families
         .get(&FontFamily::Proportional)

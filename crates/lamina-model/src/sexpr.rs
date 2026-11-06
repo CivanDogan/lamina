@@ -1,5 +1,5 @@
-//! S-expressions as KiCad and Specctra use them: a small reader and a
-//! writer in KiCad's layout.
+//! S-expressions as KiCad and Specctra use them: a small reader, and a
+//! writer that uses the KiCad layout.
 
 use std::fmt::Write as _;
 
@@ -43,7 +43,7 @@ impl Sx {
         self.text()?.parse().ok()
     }
 
-    /// Name of a list node: its first atom.
+    /// The name of a list node: its first atom.
     pub fn name(&self) -> Option<&str> {
         match self {
             Sx::List(items) => items.first()?.text(),
@@ -55,7 +55,7 @@ impl Sx {
         self.name() == Some(name)
     }
 
-    /// Elements after the name.
+    /// The elements after the name.
     pub fn args(&self) -> &[Sx] {
         match self {
             Sx::List(items) if !items.is_empty() => &items[1..],
@@ -73,7 +73,7 @@ impl Sx {
         self.args().get(i)?.number()
     }
 
-    /// Leading atom arguments, up to the first sub-list.
+    /// The atom arguments at the start, up to the first sub-list.
     pub fn atoms(&self) -> Vec<&str> {
         self.args()
             .iter()
@@ -91,7 +91,7 @@ impl Sx {
         self.args().iter().find(|c| c.is(name))
     }
 
-    /// First numeric argument of the child `name`, e.g. `(width 0.12)`.
+    /// The first numeric argument of the child `name`, for example `(width 0.12)`.
     pub fn child_num(&self, name: &str) -> Option<f64> {
         self.child(name)?.arg_num(0)
     }
@@ -100,7 +100,7 @@ impl Sx {
         self.child(name)?.arg(0)
     }
 
-    /// `(at x y [rot])` style pairs.
+    /// Pairs in the style `(at x y [rot])`.
     pub fn xy(&self, name: &str) -> Option<(f64, f64)> {
         let c = self.child(name)?;
         Some((c.arg_num(0)?, c.arg_num(1)?))
@@ -113,7 +113,7 @@ impl Sx {
     }
 }
 
-/// Builder for writing.
+/// A builder for the writer.
 pub struct Node(pub Vec<Sx>);
 
 impl Node {
@@ -156,12 +156,12 @@ impl Node {
     }
 }
 
-/// Shorthand: `n("at").num(x).num(y)`.
+/// A short form: `n("at").num(x).num(y)`.
 pub fn n(name: &str) -> Node {
     Node::new(name)
 }
 
-/// Numbers as KiCad writes them: up to 6 decimals, no trailing zeros.
+/// Numbers as KiCad writes them: up to 6 decimals, with no zeros at the end.
 pub fn fmt_num(v: f64) -> String {
     let r = (v * 1e6).round() / 1e6;
     let r = if r == 0.0 { 0.0 } else { r };
@@ -186,13 +186,16 @@ pub fn parse(src: &str) -> Result<Sx, String> {
     let v = p.value()?;
     p.ws();
     if p.i < p.b.len() {
-        return Err(format!("line {}: text after the document", p.line));
+        return Err(format!(
+            "line {}: there is text after the document.",
+            p.line
+        ));
     }
     Ok(v)
 }
 
-/// Every top-level value in a file (a `.kicad_mod` has one, libraries may
-/// concatenate several).
+/// All top-level values in a file. A `.kicad_mod` has one. Libraries can
+/// have more than one, one after the other.
 pub fn parse_all(src: &str) -> Result<Vec<Sx>, String> {
     let mut p = Parser {
         b: src.as_bytes(),
@@ -231,7 +234,7 @@ impl Parser<'_> {
 
     fn value(&mut self) -> Result<Sx, String> {
         match self.b.get(self.i) {
-            None => Err(format!("line {}: unexpected end of file", self.line)),
+            None => Err(format!("line {}: the file ends too early.", self.line)),
             Some(b'(') => {
                 self.i += 1;
                 let mut items = Vec::new();
@@ -239,13 +242,13 @@ impl Parser<'_> {
                     self.ws();
                     match self.b.get(self.i) {
                         None => {
-                            return Err(format!("line {}: missing `)`", self.line));
+                            return Err(format!("line {}: a `)` is missing.", self.line));
                         }
                         Some(b')') => {
                             self.i += 1;
                             return Ok(Sx::List(items));
                         }
-                        // Specctra's `(string_quote ")` names the quote character itself.
+                        // In Specctra, `(string_quote ")` gives the quote character itself.
                         Some(b'"')
                             if items.len() == 1 && items[0].text() == Some("string_quote") =>
                         {
@@ -256,13 +259,16 @@ impl Parser<'_> {
                     }
                 }
             }
-            Some(b')') => Err(format!("line {}: unexpected `)`", self.line)),
+            Some(b')') => Err(format!("line {}: this `)` has no matching `(`.", self.line)),
             Some(b'"') => {
                 self.i += 1;
                 let mut out = Vec::new();
                 loop {
                     let Some(&c) = self.b.get(self.i) else {
-                        return Err(format!("line {}: unterminated string", self.line));
+                        return Err(format!(
+                            "line {}: the string has no closing quote.",
+                            self.line
+                        ));
                     };
                     self.i += 1;
                     match c {
@@ -310,7 +316,7 @@ impl Parser<'_> {
 
 // ---------------------------------------------------------------- writing
 
-/// Write in KiCad's style: one node per line, tabs for depth, atoms inline.
+/// Writes in the KiCad style: one node on each line, tabs for depth, atoms on the same line.
 pub fn write(sx: &Sx) -> String {
     let mut out = String::new();
     write_into(&mut out, sx, 0);
@@ -368,7 +374,7 @@ fn write_into(out: &mut String, sx: &Sx, depth: usize) {
     }
 }
 
-/// Short form `(name a b c)` on one line, for compact output.
+/// The short form `(name a b c)` on one line, for compact output.
 pub fn write_inline(sx: &Sx) -> String {
     let mut s = String::new();
     match sx {

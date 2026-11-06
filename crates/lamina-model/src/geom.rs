@@ -1,4 +1,4 @@
-//! Basic geometry types. Units are millimetres, Y up, angles in degrees CCW.
+//! Basic geometry types. Units are millimetres. Y is up. Angles are in degrees CCW.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ impl Point {
         (self.x - o.x).hypot(self.y - o.y)
     }
 
-    /// Rotate around the origin by `deg` degrees CCW.
+    /// Rotates the point around the origin by `deg` degrees CCW.
     pub fn rotated(self, deg: f64) -> Point {
         if deg == 0.0 {
             return self;
@@ -111,7 +111,7 @@ impl Rect {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ArcTo {
     pub center: Point,
-    /// Counter-clockwise when true.
+    /// True for counter-clockwise.
     pub ccw: bool,
 }
 
@@ -119,7 +119,7 @@ pub struct ArcTo {
 pub struct Vertex {
     pub x: f64,
     pub y: f64,
-    /// When set, the edge to the next vertex is an arc. A contour of one
+    /// If this is set, the edge to the next vertex is an arc. A contour of one
     /// vertex with an arc is a full circle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc: Option<ArcTo>,
@@ -153,7 +153,7 @@ impl Contour {
         }
     }
 
-    /// Rectangle with rounded corners of radius `r`.
+    /// A rectangle with rounded corners of radius `r`.
     pub fn rounded_rect(x: f64, y: f64, w: f64, h: f64, r: f64) -> Contour {
         if r <= 0.0 {
             return Self::rect(x, y, w, h);
@@ -221,49 +221,51 @@ impl Contour {
         }
     }
 
-    /// Check shape sanity. Returns a description of the first problem.
+    /// Checks that the shape is valid. Returns a description of the first problem.
     pub fn check(&self) -> Result<(), String> {
         let n = self.vertices.len();
         if n == 0 {
-            return Err("contour has no vertices".into());
+            return Err("The contour has no vertices.".into());
         }
         for (i, v) in self.vertices.iter().enumerate() {
             if !v.point().is_finite() {
-                return Err(format!("vertex {i} is not finite"));
+                return Err(format!("Vertex {i} is not finite."));
             }
             if let Some(a) = v.arc {
                 if !a.center.is_finite() {
-                    return Err(format!("arc centre at vertex {i} is not finite"));
+                    return Err(format!("The arc centre at vertex {i} is not finite."));
                 }
                 let next = self.vertices[(i + 1) % n].point();
                 let r0 = v.point().dist(a.center);
                 let r1 = next.dist(a.center);
                 if r0 < 1e-6 {
-                    return Err(format!("arc at vertex {i} has zero radius"));
+                    return Err(format!("The arc at vertex {i} has zero radius."));
                 }
                 if (r0 - r1).abs() > 1e-4_f64.max(r0 * 1e-6) {
                     return Err(format!(
-                        "arc at vertex {i}: start radius {r0} and end radius {r1} differ"
+                        "The arc at vertex {i} is not valid: the start radius {r0} and end radius {r1} are not equal."
                     ));
                 }
             }
         }
         if n == 1 && self.vertices[0].arc.is_none() {
-            return Err("a one-vertex contour must be a circle (set arc)".into());
+            return Err(
+                "A contour with one vertex must be a circle. Set arc on the vertex.".into(),
+            );
         }
         if n == 2 && self.vertices.iter().all(|v| v.arc.is_none()) {
-            return Err("contour needs at least 3 vertices".into());
+            return Err("The contour must have a minimum of 3 vertices.".into());
         }
         Ok(())
     }
 
-    /// Bounding box including arc bulges.
+    /// The bounding box, with the arc bulges included.
     pub fn bbox(&self) -> Option<Rect> {
         let pts = self.flatten(0.01);
         Rect::from_points(pts)
     }
 
-    /// Polyline approximation with maximum chord error `tol` (mm).
+    /// A polyline approximation with a maximum chord error of `tol` (mm).
     pub fn flatten(&self, tol: f64) -> Vec<Point> {
         let n = self.vertices.len();
         let mut out = Vec::new();
@@ -297,7 +299,7 @@ impl Contour {
         }
     }
 
-    /// Exact signed area (positive when counter-clockwise).
+    /// The exact signed area (positive if counter-clockwise).
     pub fn signed_area(&self) -> f64 {
         let n = self.vertices.len();
         let mut a = 0.0;
@@ -308,7 +310,7 @@ impl Contour {
             if let Some(arc) = self.vertices[i].arc {
                 let sweep = arc_sweep(p, q, arc.center, arc.ccw, n == 1);
                 let r = p.dist(arc.center);
-                // Circular segment between chord and arc.
+                // The circular segment between the chord and the arc.
                 a += r * r / 2.0 * (sweep - sweep.sin());
             }
         }
@@ -316,7 +318,7 @@ impl Contour {
     }
 }
 
-/// Signed sweep angle in radians of an arc from `p0` to `p1`.
+/// The signed sweep angle in radians of an arc from `p0` to `p1`.
 pub fn arc_sweep(p0: Point, p1: Point, c: Point, ccw: bool, full: bool) -> f64 {
     let tau = std::f64::consts::TAU;
     if full {
@@ -331,7 +333,7 @@ pub fn arc_sweep(p0: Point, p1: Point, c: Point, ccw: bool, full: bool) -> f64 {
     }
 }
 
-/// Intermediate points of an arc from `p0` to `p1` (both excluded).
+/// The points between `p0` and `p1` on an arc (`p0` and `p1` are not included).
 pub fn arc_points(p0: Point, p1: Point, c: Point, ccw: bool, tol: f64, full: bool) -> Vec<Point> {
     let r = p0.dist(c);
     let a0 = (p0.y - c.y).atan2(p0.x - c.x);
@@ -350,7 +352,7 @@ pub fn arc_points(p0: Point, p1: Point, c: Point, ccw: bool, tol: f64, full: boo
         .collect()
 }
 
-/// A graphic primitive used for silkscreen, fab, courtyard and board graphics.
+/// A graphic primitive for silkscreen, fab, courtyard and board graphics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Shape {
@@ -358,7 +360,7 @@ pub enum Shape {
         a: Point,
         b: Point,
     },
-    /// Arc from `start` around `center`, sweeping `angle` degrees (CCW positive).
+    /// An arc from `start` around `center`, through `angle` degrees (CCW is positive).
     Arc {
         center: Point,
         start: Point,
@@ -488,7 +490,7 @@ mod tests {
 
 // ---------------------------------------------------------------- outlines from edges
 
-/// A loose edge of an outline being assembled from drawing primitives.
+/// A loose edge of an outline that is made from drawing primitives.
 #[derive(Clone, Debug)]
 pub enum Edge {
     Line(Point, Point),
@@ -498,11 +500,11 @@ pub enum Edge {
         center: Point,
         ccw: bool,
     },
-    /// A complete closed loop that needs no chaining.
+    /// A complete closed loop. It does not need a chain.
     Loop(Contour),
 }
 
-/// Edges of a drawing shape, for [`chain_edges`].
+/// The edges of a drawing shape, for [`chain_edges`].
 pub fn edges_of(shape: &Shape) -> Vec<Edge> {
     match shape {
         Shape::Line { a, b } => vec![Edge::Line(*a, *b)],
@@ -535,7 +537,7 @@ pub fn edges_of(shape: &Shape) -> Vec<Edge> {
     }
 }
 
-/// A counter-clockwise contour from a point list (no arcs); `None` when degenerate.
+/// A counter-clockwise contour from a point list (no arcs). `None` if it is degenerate.
 pub fn contour_from_points(mut pts: Vec<Point>) -> Option<Contour> {
     pts.dedup_by(|a, b| a.dist(*b) < 1e-6);
     if pts.len() > 2 && pts[0].dist(*pts.last().unwrap()) < 1e-6 {
@@ -553,14 +555,14 @@ pub fn contour_from_points(mut pts: Vec<Point>) -> Option<Contour> {
     Some(c)
 }
 
-/// Start, end and optional arc (centre, counter-clockwise) of a loose edge.
+/// The start, the end and the optional arc (centre, counter-clockwise) of a loose edge.
 type Seg = (Point, Point, Option<(Point, bool)>);
 
-/// Join loose edges into closed loops. Edges whose ends coincide (within
-/// 5 µm) are joined first into paths; then the ends of open paths are
-/// bridged, closest first, when they are less than `tol` (mm) apart. A
-/// bridge becomes a short straight edge. Returns the loops and how many
-/// edges could not be used.
+/// Joins loose edges into closed loops. First, edges with ends at the same
+/// point (within 5 µm) are joined into paths. Then, if the ends of open paths
+/// are less than `tol` (mm) apart, they are bridged, closest first. A bridge
+/// becomes a short straight edge. Returns the loops and the number of edges
+/// that it did not use.
 pub fn chain_edges(edges: Vec<Edge>, tol: f64) -> (Vec<Contour>, usize) {
     let tol = tol.max(1e-6);
     let eps = tol.min(0.005);
@@ -583,8 +585,8 @@ pub fn chain_edges(edges: Vec<Edge>, tol: f64) -> (Vec<Contour>, usize) {
         }
     }
     let flip = |e: Seg| (e.1, e.0, e.2.map(|(c, ccw)| (c, !ccw)));
-    // The pooled segment with an end nearest `p` (within `eps`), oriented
-    // so that it starts there (`at_start`) or ends there.
+    // The segment in the pool with an end nearest to `p` (within `eps`). It is
+    // turned so that it starts there (`at_start`) or ends there.
     let take = |pool: &mut Vec<Seg>, p: Point, at_start: bool| -> Option<Seg> {
         let mut best: Option<(f64, usize, bool)> = None;
         for (i, e) in pool.iter().enumerate() {
@@ -597,14 +599,14 @@ pub fn chain_edges(edges: Vec<Edge>, tol: f64) -> (Vec<Contour>, usize) {
         }
         let (_, i, rev) = best?;
         let e = pool.swap_remove(i);
-        // `rev` means the matching end is the segment's end.
+        // `rev` means that the end that matches is the end of the segment.
         Some(match (at_start, rev) {
             (true, false) | (false, true) => e,
             _ => flip(e),
         })
     };
 
-    // Stage 1: paths through coinciding ends.
+    // Stage 1: make paths through ends that are at the same point.
     let mut paths: Vec<std::collections::VecDeque<Seg>> = Vec::new();
     while let Some(first) = pool.pop() {
         let mut path = std::collections::VecDeque::from([first]);
@@ -636,14 +638,14 @@ pub fn chain_edges(edges: Vec<Edge>, tol: f64) -> (Vec<Contour>, usize) {
     };
     let (mut done, mut todo): (Vec<_>, Vec<_>) = paths.into_iter().partition(is_closed);
     loop {
-        // (distance, path, other path or itself, join to the other's end)
+        // (distance, path, other path or itself, join to the end of the other path)
         let mut best: Option<(f64, usize, usize, bool)> = None;
         for (i, p) in todo.iter().enumerate() {
             let end = p.back().unwrap().1;
             for (j, q) in todo.iter().enumerate() {
                 let start = q.front().unwrap().0;
                 let d = end.dist(start);
-                // Closing a single segment on itself is not a loop.
+                // A single segment closed on itself is not a loop.
                 if d < tol && !(i == j && p.len() < 2) && best.is_none_or(|b| d < b.0) {
                     best = Some((d, i, j, false));
                 }
@@ -673,9 +675,9 @@ pub fn chain_edges(edges: Vec<Edge>, tol: f64) -> (Vec<Contour>, usize) {
     }
     open += todo.iter().map(|p| p.len()).sum::<usize>();
 
-    // Each edge starts a vertex; where an edge ends short of the next one,
-    // its true end becomes a vertex too, so arcs keep their radius and a
-    // short line bridges the gap.
+    // Each edge starts a vertex. If an edge ends before the next one, its true
+    // end also becomes a vertex. This way, arcs keep their radius and a short
+    // line bridges the gap.
     let build = |chain: &[Seg]| {
         let mut vertices = Vec::new();
         for (k, (a, b, arc)) in chain.iter().enumerate() {

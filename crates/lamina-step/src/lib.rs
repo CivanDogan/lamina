@@ -1,4 +1,4 @@
-//! 3D models: OBJ and STEP loading, tessellation and the mesh cache.
+//! 3D models: load and tessellate OBJ and STEP files, and keep a mesh cache.
 
 pub mod mesh;
 pub mod obj;
@@ -9,8 +9,8 @@ pub use mesh::{Mesh, MeshPart};
 
 use std::path::Path;
 
-/// Load a model file (OBJ or STEP), using a cached mesh next to it when the
-/// source has not changed.
+/// Load a model file (OBJ or STEP). If the source has not changed, use the
+/// cached mesh next to it.
 pub fn load(path: &Path) -> Result<Mesh, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let ext = path

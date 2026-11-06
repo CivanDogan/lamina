@@ -1,8 +1,8 @@
-//! STEP (AP214) export of the assembled board: the board as a solid with
-//! its outline, cut-outs and drilled holes, and every part's 3D model
-//! placed as an assembly component. Part STEP files are copied in whole,
-//! so their exact geometry and colours survive; models that are only
-//! meshes (OBJ) go in as faceted surfaces.
+//! STEP (AP214) export of the assembled board. The board is a solid with its
+//! outline, cut-outs and drilled holes. The 3D model of each part is an
+//! assembly component. The export copies all of each part STEP file, so its
+//! exact geometry and colours stay the same. Models that are only meshes (OBJ)
+//! become faceted surfaces.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -14,9 +14,10 @@ use lamina_model::*;
 
 #[derive(Debug, Clone)]
 pub struct StepOptions {
-    /// Drill vias through the board too (off by default: many tiny holes).
+    /// Also drill the vias through the board. This is off by default, because
+    /// there are many tiny holes.
     pub vias: bool,
-    /// Include part models (default true).
+    /// Include the part models (default true).
     pub parts: bool,
 }
 
@@ -31,12 +32,12 @@ impl Default for StepOptions {
 
 #[derive(Debug, Default)]
 pub struct StepExport {
-    /// The file. Bytes, not text: copied part files may carry names in
-    /// other encodings, which are kept exactly as they were.
+    /// The file, as bytes and not as text. Copied part files can have names in
+    /// other encodings. The export keeps these names exactly as they are.
     pub bytes: Vec<u8>,
-    /// Parts placed with their exact STEP model.
+    /// The number of parts with their exact STEP model.
     pub exact: usize,
-    /// Parts placed as faceted meshes.
+    /// The number of parts as faceted meshes.
     pub meshed: usize,
     pub notes: Vec<String>,
 }
@@ -57,7 +58,7 @@ impl W {
         id
     }
 
-    /// Reserve an id to define later.
+    /// Reserve an id. Define it later.
     fn reserve(&mut self) -> u32 {
         let id = self.next;
         self.next += 1;
@@ -95,7 +96,7 @@ impl W {
     }
 }
 
-/// A STEP real: always with a decimal point.
+/// A STEP real. It always has a decimal point.
 fn r(v: f64) -> String {
     let v = if v.abs() < 1e-12 { 0.0 } else { v };
     if v == v.trunc() && v.abs() < 1e15 {
@@ -106,7 +107,7 @@ fn r(v: f64) -> String {
     s.to_string()
 }
 
-/// A STEP string literal, with non-ASCII text encoded as `\X2\`.
+/// A STEP string literal. Non-ASCII text is encoded as `\X2\`.
 fn s(text: &str) -> String {
     let mut out = String::from("'");
     let mut wide = String::new();
@@ -212,7 +213,7 @@ fn unit(v: [f64; 3]) -> [f64; 3] {
     [v[0] / l, v[1] / l, v[2] / l]
 }
 
-/// Board-frame transform of a part's model (rigid: no scale).
+/// The transform of the model of a part in the board frame (rigid: no scale).
 fn model_transform(pl: &Placement, mr: &ModelRef, thickness: f64) -> M4 {
     let base = mul(&translate(pl.x, pl.y, 0.0), &rot_z(pl.rotation));
     let place = match pl.side {
@@ -231,12 +232,12 @@ fn model_transform(pl: &Placement, mr: &ModelRef, thickness: f64) -> M4 {
 
 // ---------------------------------------------------------------- board solid
 
-/// Reverse a contour's direction (arcs keep their centres, flip sense).
+/// Reverse the direction of a contour. Arcs keep their centres and change their sense.
 fn reversed(c: &Contour) -> Contour {
     let n = c.vertices.len();
     let mut v = Vec::with_capacity(n);
     for k in (0..n).rev() {
-        // Edge k goes vertex k -> k+1; reversed it starts at k+1.
+        // Edge k goes from vertex k to k+1. When reversed, it starts at k+1.
         let next = c.vertices[(k + 1) % n];
         v.push(Vertex {
             x: next.x,
@@ -250,7 +251,7 @@ fn reversed(c: &Contour) -> Contour {
     Contour { vertices: v }
 }
 
-/// A full circle as two half arcs, so every edge has distinct ends.
+/// A full circle as two half arcs, so that each edge has two different ends.
 fn split_circle(c: &Contour) -> Contour {
     if c.vertices.len() != 1 {
         return c.clone();
@@ -275,7 +276,7 @@ fn split_circle(c: &Contour) -> Contour {
     }
 }
 
-/// Orient a loop with the material on its left: outer CCW, holes CW.
+/// Turn a loop so that the material is on its left: outer CCW, holes CW.
 fn oriented(c: &Contour, outer: bool) -> Contour {
     let c = split_circle(c);
     if (c.signed_area() > 0.0) == outer {
@@ -330,10 +331,10 @@ fn slot_loop(a: Point, bb: Point, radius: f64) -> Contour {
     }
 }
 
-/// Edges and side faces of one profile loop extruded from z = 0 to `t`.
+/// The edges and side faces of one profile loop, extruded from z = 0 to `t`.
 struct LoopEdges {
-    /// Bottom and top edge of each segment, and whether traversing the loop
-    /// runs along the edge's own direction.
+    /// The bottom and top edge of each segment, and true if the loop goes in
+    /// the direction of the edge.
     bottom: Vec<(u32, bool)>,
     top: Vec<(u32, bool)>,
 }
@@ -380,7 +381,7 @@ fn extrude_loop(w: &mut W, c: &Contour, t: f64, faces: &mut Vec<u32>) -> LoopEdg
                 };
                 let eb = edge(0.0, vb[i], vb[j], w);
                 let et = edge(t, vt[i], vt[j], w);
-                // Outward normal: right of the direction (material on the left).
+                // The outward normal is to the right of the direction (material on the left).
                 let ax = w.axis([a.x, a.y, 0.0], [dir[1], -dir[0], 0.0], dir);
                 let plane = w.add(format!("PLANE('',#{ax})"));
                 (eb, et, true, plane, true)
@@ -390,8 +391,8 @@ fn extrude_loop(w: &mut W, c: &Contour, t: f64, faces: &mut Vec<u32>) -> LoopEdg
                 let edge = |z: f64, v0: u32, v1: u32, w: &mut W| {
                     let ax = w.axis([arc.center.x, arc.center.y, z], up, xdir);
                     let circle = w.add(format!("CIRCLE('',#{ax},{})", r(rad)));
-                    // Circles run counter-clockwise; a clockwise arc is the
-                    // edge from its end to its start.
+                    // Circles go counter-clockwise. A clockwise arc is the edge
+                    // from its end to its start.
                     if arc.ccw {
                         w.add(format!("EDGE_CURVE('',#{v0},#{v1},#{circle},.T.)"))
                     } else {
@@ -405,7 +406,7 @@ fn extrude_loop(w: &mut W, c: &Contour, t: f64, faces: &mut Vec<u32>) -> LoopEdg
                 (eb, et, arc.ccw, cyl, arc.ccw)
             }
         };
-        // Side face, seen from outside: bottom forward, up, top back, down.
+        // The side face, as seen from outside: bottom forward, up, top back, down.
         let oe = [
             w.add(format!("ORIENTED_EDGE('',*,*,#{eb},{})", b(fwd))),
             w.add(format!("ORIENTED_EDGE('',*,*,#{},.T.)", ev[j])),
@@ -425,7 +426,7 @@ fn extrude_loop(w: &mut W, c: &Contour, t: f64, faces: &mut Vec<u32>) -> LoopEdg
     LoopEdges { bottom, top }
 }
 
-/// The board as a closed B-rep solid; returns the solid's id.
+/// Make the board as a closed B-rep solid. Return the id of the solid.
 fn board_solid(w: &mut W, outer: &Contour, inner: &[Contour], t: f64) -> u32 {
     let mut faces = Vec::new();
     let outer = oriented(outer, true);
@@ -434,9 +435,9 @@ fn board_solid(w: &mut W, outer: &Contour, inner: &[Contour], t: f64) -> u32 {
     for c in &inner {
         loops.push(extrude_loop(w, c, t, &mut faces));
     }
-    // Top: loops as they run (counter-clockwise outer seen from above).
+    // Top: the loops in their direction (the outer loop is counter-clockwise from above).
     let mut top_bounds = Vec::new();
-    // Bottom: the face normal points down, so every loop runs backwards.
+    // Bottom: the face normal points down, so each loop goes in the opposite direction.
     let mut bottom_bounds = Vec::new();
     for (k, l) in loops.iter().enumerate() {
         let te: Vec<u32> = l
@@ -528,7 +529,7 @@ fn contexts(w: &mut W) -> Ctx {
     }
 }
 
-/// A product with its definition; returns (product definition, its shape).
+/// Make a product with its definition. Return (product definition, its shape).
 fn product(w: &mut W, c: &Ctx, name: &str) -> (u32, u32) {
     let n = s(name);
     let p = w.add(format!("PRODUCT({n},{n},'',(#{}))", c.product_ctx));
@@ -542,7 +543,7 @@ fn product(w: &mut W, c: &Ctx, name: &str) -> (u32, u32) {
     (pd, pds)
 }
 
-/// Place `child` (product definition and representation) in `parent`.
+/// Put `child` (product definition and representation) in `parent`.
 fn place(w: &mut W, parent: (u32, u32), child: (u32, u32), name: &str, k: usize, m: &M4) -> u32 {
     let o = apply(m, [0.0; 3], 1.0);
     let z = unit(apply(m, [0.0, 0.0, 1.0], 0.0));
@@ -571,11 +572,11 @@ fn place(w: &mut W, parent: (u32, u32), child: (u32, u32), name: &str, k: usize,
     parent_axis
 }
 
-// ---------------------------------------------------------------- copying part files
+// ---------------------------------------------------------------- copies of part files
 
-/// The entities of a STEP file's DATA section with every `#n` raised by
-/// `offset`, and the largest id seen. Works on bytes so text in any
-/// encoding passes through unchanged.
+/// The entities of the DATA section of a STEP file, with `offset` added to each
+/// `#n`, and the largest id found. This works on bytes, so text in all
+/// encodings stays the same.
 fn renumber(text: &[u8], offset: u32) -> Result<(Vec<u8>, u32), String> {
     let find = |from: usize, pat: &[u8]| {
         text[from..]
@@ -618,7 +619,7 @@ fn renumber(text: &[u8], offset: u32) -> Result<(Vec<u8>, u32), String> {
                     let n: u32 = std::str::from_utf8(&b[s0..e])
                         .ok()
                         .and_then(|t| t.parse().ok())
-                        .ok_or("bad entity id")?;
+                        .ok_or("The entity id is not valid")?;
                     max = max.max(n);
                     out.extend_from_slice(&b[seg..i]);
                     out.extend_from_slice(format!("#{}", n + offset).as_bytes());
@@ -633,7 +634,7 @@ fn renumber(text: &[u8], offset: u32) -> Result<(Vec<u8>, u32), String> {
             _ => i += 1,
         }
     }
-    Err("DATA section has no ENDSEC".into())
+    Err("The DATA section has no ENDSEC".into())
 }
 
 /// The top product definition of a STEP file and its shape representation.
@@ -676,7 +677,7 @@ fn root_of(text: &[u8]) -> Option<(u32, u32)> {
     roots.into_iter().next()
 }
 
-/// A mesh as a faceted surface model; returns (product definition, rep).
+/// Make a mesh into a faceted surface model. Return (product definition, rep).
 fn mesh_product(w: &mut W, c: &Ctx, name: &str, mesh: &lamina_step::Mesh) -> (u32, u32) {
     let (pd, pds) = product(w, c, name);
     let mut points: HashMap<[u32; 3], u32> = HashMap::new();
@@ -725,7 +726,7 @@ fn mesh_product(w: &mut W, c: &Ctx, name: &str, mesh: &lamina_step::Mesh) -> (u3
         }
         let shell = w.add(format!("OPEN_SHELL('',({}))", ids(&faces)));
         let lin = |v: f32| -> f64 {
-            // Mesh colours are linear; STEP colours are display RGB.
+            // Mesh colours are linear. STEP colours are display RGB.
             let v = v.clamp(0.0, 1.0) as f64;
             if v <= 0.0031308 {
                 v * 12.92
@@ -763,7 +764,11 @@ pub fn export_step(
     name: &str,
     opt: &StepOptions,
 ) -> Result<StepExport, String> {
-    let outline = d.board.outline.as_ref().ok_or("the board has no outline")?;
+    let outline = d
+        .board
+        .outline
+        .as_ref()
+        .ok_or("The board has no outline. Set an outline and try again.")?;
     let t = d.board.stackup.thickness;
     let mut w = W {
         out: Vec::new(),
@@ -793,7 +798,7 @@ pub fn export_step(
     }
     if vias > 0 {
         out.notes.push(format!(
-            "{vias} via hole(s) left out (pass vias: true to drill them)"
+            "{vias} via hole(s) are not in the file. To drill them, set vias: true"
         ));
     }
 
@@ -852,7 +857,7 @@ pub fn export_step(
             };
             let Some(path) = find_model(root, &mr.file) else {
                 out.notes
-                    .push(format!("{refdes}: model {} not found", mr.file));
+                    .push(format!("{refdes}: the model {} is not found", mr.file));
                 continue;
             };
             let scaled = mr.scale.iter().any(|s| (s - 1.0).abs() > 1e-9);
@@ -920,11 +925,11 @@ pub fn export_step(
     Ok(out)
 }
 
-/// A model in the file: (product definition, representation), and whether
-/// it is the exact STEP geometry rather than a mesh.
+/// A model in the file: (product definition, representation), and true if it
+/// is the exact STEP geometry and not a mesh.
 type Placed = ((u32, u32), bool);
 
-/// Copy a model file in (or mesh it).
+/// Copy a model file into the export (or make it a mesh).
 fn add_model(
     w: &mut W,
     c: &Ctx,
@@ -961,7 +966,7 @@ fn add_model(
                 }
             }
             out.notes.push(format!(
-                "{name}: no product structure in the STEP file; exported as a mesh"
+                "{name}: the STEP file has no product structure, so it is exported as a mesh"
             ));
         }
     }
@@ -979,7 +984,8 @@ fn add_model(
             Some((mesh_product(w, c, &name, &mesh), false))
         }
         Err(e) => {
-            out.notes.push(format!("{name}: model does not load ({e})"));
+            out.notes
+                .push(format!("{name}: the model does not load ({e})"));
             None
         }
     }
@@ -1095,7 +1101,7 @@ mod tests {
                 && (hi[2] - 1.6).abs() < 1e-3,
             "{hi:?}"
         );
-        // Area of the faces looking straight up: the board minus its holes.
+        // The area of the faces that point straight up: the board minus its holes.
         let mut up = 0.0f64;
         let mut side = 0.0f64;
         for p in &mesh.parts {
@@ -1127,7 +1133,7 @@ mod tests {
         let slot = 3.0 * 1.0 + std::f64::consts::PI * 0.25;
         let want = 600.0 - corners - 24.0 - hole - slot;
         assert!((up - want).abs() < 0.5, "top area {up} vs {want}");
-        // Walls: outline perimeter plus the cut-out, hole and slot walls.
+        // Walls: the outline perimeter and the walls of the cut-out, hole and slot.
         let perim = 2.0 * (26.0 + 16.0)
             + 2.0 * std::f64::consts::PI * 2.0
             + 20.0

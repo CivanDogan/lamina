@@ -6,7 +6,7 @@ use std::fmt::Write;
 use lamina_model::Point;
 use lamina_scene::Geom;
 
-/// Gerber file function attribute, e.g. `Copper,L1,Top`.
+/// The Gerber file function attribute, for example `Copper,L1,Top`.
 pub struct Function {
     pub function: String,
     /// `Positive` or `Negative`.
@@ -84,7 +84,7 @@ impl Writer {
         self.body.push_str("G37*\n");
     }
 
-    /// Add a shape in dark polarity; polygon holes are cleared right after.
+    /// Add a shape in dark polarity. Then clear the polygon holes.
     pub fn add(&mut self, g: &Geom) {
         match g {
             Geom::Disc { c, r } => {

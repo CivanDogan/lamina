@@ -28,7 +28,7 @@ fn create_edit_and_reopen() {
     }
 
     let (err, msg) = c.call("status", json!({}));
-    assert!(err && msg.as_str().unwrap().contains("no project is open"));
+    assert!(err && msg.as_str().unwrap().contains("No project is open"));
 
     let s = c.ok("open", json!({"path": path_s, "create": true}));
     assert_eq!(s["name"], "demo");
@@ -64,7 +64,7 @@ fn create_edit_and_reopen() {
 
     drop(c);
 
-    // Files are on disk and readable by a fresh process.
+    // The files are on disk, and a new process can read them.
     let nets = std::fs::read_to_string(path.join("nets.json")).unwrap();
     assert!(nets.contains("\"C2.2\""));
     let board = std::fs::read_to_string(path.join("board.json")).unwrap();

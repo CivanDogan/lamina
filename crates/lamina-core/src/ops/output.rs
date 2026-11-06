@@ -10,7 +10,7 @@ pub struct Export {
     /// Output folder, relative to the project (default `output`).
     #[serde(default)]
     pub dir: Option<String>,
-    /// Export even when DRC reports errors (default false).
+    /// Export also if DRC finds errors (default false).
     #[serde(default)]
     pub force: bool,
 }
@@ -52,7 +52,8 @@ impl Project {
         if !errors.is_empty() && !p.force {
             let list: Vec<String> = errors.iter().take(8).map(|v| v.message.clone()).collect();
             return Err(Error::Refused(format!(
-                "{} DRC error(s); fix them or pass force: true. First: {}",
+                "There are {} DRC error(s). To export, fix them or pass force: true. \
+                 The first errors are: {}",
                 errors.len(),
                 list.join("; ")
             )));
@@ -76,16 +77,24 @@ impl Project {
         let (asm, mut warnings) = lamina_export::assembly(&self.data, &name);
         let rel = p.dir.unwrap_or_else(|| "output".into());
         if rel.contains("..") {
-            return Err(Error::invalid("dir must stay inside the project"));
+            return Err(Error::invalid(
+                "dir must be in the project folder. Do not use `..` in it.",
+            ));
         }
         let dir = self.root().join(rel);
         let files = lamina_export::write(&dir, &name, &fab, &asm).map_err(Error::Invalid)?;
         if !errors.is_empty() {
-            warnings.insert(0, format!("exported with {} DRC error(s)", errors.len()));
+            warnings.insert(
+                0,
+                format!(
+                    "The files were exported with {} DRC error(s).",
+                    errors.len()
+                ),
+            );
         }
         let unrouted = a.ratsnest.len();
         if unrouted > 0 {
-            warnings.push(format!("{unrouted} connection(s) are still unrouted"));
+            warnings.push(format!("{unrouted} connection(s) are not routed yet."));
         }
         Ok(Exported {
             files: files.iter().map(|f| f.display().to_string()).collect(),
@@ -117,7 +126,7 @@ impl Project {
 
     pub fn add_note(&mut self, p: AddNote) -> Result<Note> {
         if p.text.trim().is_empty() {
-            return Err(Error::invalid("text is empty"));
+            return Err(Error::invalid("The note text is empty. Give a text."));
         }
         let mut n = self.notes_from_disk();
         let next = n
@@ -162,14 +171,14 @@ impl Project {
 pub struct ImportGerbers {
     /// A folder or a zip of Gerber and drill files, from any CAD program.
     pub path: String,
-    /// Replace a project that already has a board.
+    /// Replace the board if the project already has one.
     #[serde(default)]
     pub replace: bool,
 }
 
 impl Project {
-    /// Read fab outputs as artwork: outline, holes, copper and silkscreen
-    /// drawings, with no parts or nets.
+    /// Read fab output files as artwork: the outline, the holes, and the copper
+    /// and silkscreen drawings. The result has no parts and no nets.
     pub fn import_gerbers(&mut self, p: ImportGerbers) -> Result<OpResult> {
         let path = std::path::Path::new(&p.path);
         let cur = &self.data;
@@ -179,7 +188,7 @@ impl Project {
             || cur.board.outline.is_some();
         if has_board && !p.replace {
             return Err(Error::Refused(
-                "the project already has a board; pass replace: true to overwrite it".into(),
+                "The project already has a board. Set replace: true to replace it.".into(),
             ));
         }
         let files = lamina_export::fab_import::read_files(path).map_err(Error::Invalid)?;
@@ -227,13 +236,13 @@ impl Project {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 pub struct ExportStep {
-    /// Output file (default `output/<board name>.step` in the project).
+    /// The output file. The default is `output/<board name>.step` in the project.
     #[serde(default)]
     pub path: Option<String>,
-    /// Drill vias through the board too (default false).
+    /// Also drill the vias through the board (default false).
     #[serde(default)]
     pub vias: bool,
-    /// Leave the part models out and export the bare board.
+    /// Do not include the part models. Export only the bare board.
     #[serde(default)]
     pub board_only: bool,
 }
@@ -241,9 +250,9 @@ pub struct ExportStep {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct StepExported {
     pub path: String,
-    /// Parts placed with their exact STEP model.
+    /// The number of parts that have their exact STEP model.
     pub exact: usize,
-    /// Parts placed as faceted meshes (OBJ-only models).
+    /// The number of parts that are faceted meshes (models that are only OBJ).
     pub meshed: usize,
     pub bytes: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -251,7 +260,7 @@ pub struct StepExported {
 }
 
 impl Project {
-    /// The assembled board as a STEP file for mechanical CAD.
+    /// Export the assembled board as a STEP file for mechanical CAD.
     pub fn export_step(&self, p: ExportStep) -> Result<StepExported> {
         let name = self.data.board.name.clone();
         let path = match p.path {

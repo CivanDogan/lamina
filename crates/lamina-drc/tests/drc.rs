@@ -75,7 +75,7 @@ fn unrouted_then_routed() {
 #[test]
 fn clearance_and_short() {
     let mut d = board();
-    // Track of net B passing 0.05 mm above R2's pad 1 (net A).
+    // A track of net B, 0.05 mm above pad 1 of R2 (net A).
     let p = d.footprints["R_0603"].pad("1").unwrap().clone();
     let top = 10.0 + p.shape.size().1 / 2.0;
     d.routing.tracks.push(Track {
@@ -87,7 +87,7 @@ fn clearance_and_short() {
     });
     let a = analyze(&d);
     assert!(rules(&a).contains(&"clearance"), "{:?}", a.violations);
-    // Move it onto the pad: short.
+    // Move it onto the pad. This makes a short.
     d.routing.tracks[0].points = vec![Point::new(15.0, 10.0), Point::new(25.0, 10.0)];
     let a = analyze(&d);
     assert!(rules(&a).contains(&"short"), "{:?}", a.violations);
@@ -158,7 +158,7 @@ fn pour_connects_pads() {
     assert!(!a.fills[0].polygons.is_empty());
     assert!(
         a.ratsnest.is_empty(),
-        "pour should connect R1.2 and R2.1: {:?}",
+        "the pour must connect R1.2 and R2.1: {:?}",
         a.ratsnest
     );
     assert!(
@@ -166,7 +166,7 @@ fn pour_connects_pads() {
         "{:?}",
         a.violations
     );
-    // The fill keeps clear of net B's pad.
+    // The fill keeps clear of the pad of net B.
     let b_pad = lamina_geom::pad_prim(
         d.footprints["R_0603"].pad("1").unwrap(),
         &d.placement.placements["R1"],
@@ -200,17 +200,17 @@ fn two_pours_of_a_net_join_where_they_overlap() {
         thermal_gap: 0.3,
         thermal_spoke: 0.3,
     };
-    // R1.2 is near x 10.8, R2.1 near x 19.2: one pour around each pad.
+    // R1.2 is near x 10.8 and R2.1 is near x 19.2. Put one pour around each pad.
     let mut d = board();
     d.routing.zones.push(zone("left", 10.5, 5.0));
     d.routing.zones.push(zone("right", 14.0, 6.0));
     let a = analyze(&d);
     assert!(
         a.ratsnest.is_empty(),
-        "overlapping pours join: {:?}",
+        "pours that overlap must join: {:?}",
         a.ratsnest
     );
-    // With a gap between them the pads stay apart.
+    // If there is a gap between the pours, the pads stay separate.
     let mut d = board();
     d.routing.zones.push(zone("left", 10.5, 3.0));
     d.routing.zones.push(zone("right", 16.0, 4.0));

@@ -11,7 +11,7 @@ pub enum Arg {
     List(Vec<Arg>),
     /// `$` or `*`
     Null,
-    /// Typed value such as `LENGTH_MEASURE(1.0)`.
+    /// A typed value, for example `LENGTH_MEASURE(1.0)`.
     Typed(String, Vec<Arg>),
 }
 
@@ -59,8 +59,8 @@ impl Arg {
     }
 }
 
-/// An entity instance: one or more (TYPE, args) records (complex entities
-/// have several).
+/// An entity instance: one or more (TYPE, args) records. A complex entity
+/// has more than one.
 #[derive(Debug, Clone)]
 pub struct Entity {
     pub parts: Vec<(String, Vec<Arg>)>,
@@ -116,7 +116,7 @@ impl<'a> Lexer<'a> {
             self.i += 1;
             Ok(())
         } else {
-            Err(format!("expected '{}' at byte {}", c as char, self.i))
+            Err(format!("'{}' is missing at byte {}", c as char, self.i))
         }
     }
 
@@ -146,7 +146,7 @@ impl<'a> Lexer<'a> {
                     self.i += 1;
                     return Ok(out);
                 }
-                _ => return Err(format!("bad argument list at byte {}", self.i)),
+                _ => return Err(format!("the argument list at byte {} is not valid", self.i)),
             }
         }
     }
@@ -162,7 +162,7 @@ impl<'a> Lexer<'a> {
                 let v = std::str::from_utf8(&self.b[s..self.i])
                     .ok()
                     .and_then(|x| x.parse().ok())
-                    .ok_or("bad reference")?;
+                    .ok_or("a reference is not valid")?;
                 Ok(Arg::Ref(v))
             }
             Some(b'\'') => {
@@ -170,7 +170,7 @@ impl<'a> Lexer<'a> {
                 let mut s = Vec::new();
                 loop {
                     let Some(&c) = self.b.get(self.i) else {
-                        return Err("unterminated string".into());
+                        return Err("a string has no end quote".into());
                     };
                     self.i += 1;
                     if c == b'\'' {
@@ -202,7 +202,7 @@ impl<'a> Lexer<'a> {
                 Ok(Arg::Null)
             }
             Some(b'"') => {
-                // Binary literal: skip.
+                // Skip a binary literal.
                 self.i += 1;
                 while self.i < self.b.len() && self.b[self.i] != b'"' {
                     self.i += 1;
@@ -222,7 +222,10 @@ impl<'a> Lexer<'a> {
                     self.i += 1;
                 }
                 let t = std::str::from_utf8(&self.b[s..self.i]).map_err(|e| e.to_string())?;
-                Ok(Arg::Num(t.parse().map_err(|_| format!("bad number {t}"))?))
+                Ok(Arg::Num(
+                    t.parse()
+                        .map_err(|_| format!("the number {t} is not valid"))?,
+                ))
             }
             Some(c) if c.is_ascii_alphabetic() => {
                 let name = self.ident();
@@ -230,7 +233,7 @@ impl<'a> Lexer<'a> {
                 Ok(Arg::Typed(name, a))
             }
             other => Err(format!(
-                "unexpected {:?} at byte {}",
+                "{:?} at byte {} is not valid here",
                 other.map(|c| c as char),
                 self.i
             )),
@@ -244,7 +247,7 @@ fn find(h: &[u8], n: &[u8]) -> Option<usize> {
 
 /// Parse all `#id = ...;` instances of the DATA section.
 pub fn parse(bytes: &[u8]) -> Result<HashMap<u32, Entity>, String> {
-    let start = find(bytes, b"DATA;").ok_or("no DATA section")? + 5;
+    let start = find(bytes, b"DATA;").ok_or("the file has no DATA section")? + 5;
     let mut lx = Lexer { b: bytes, i: start };
     let mut out = HashMap::new();
     loop {
@@ -255,7 +258,7 @@ pub fn parse(bytes: &[u8]) -> Result<HashMap<u32, Entity>, String> {
                 if lx.b[lx.i..].starts_with(b"ENDSEC") {
                     break;
                 }
-                // Skip anything unexpected up to the next ';'.
+                // Skip all other text up to the next ';'.
                 while lx.i < lx.b.len() && lx.b[lx.i] != b';' {
                     lx.i += 1;
                 }
@@ -271,7 +274,7 @@ pub fn parse(bytes: &[u8]) -> Result<HashMap<u32, Entity>, String> {
         let id: u32 = std::str::from_utf8(&lx.b[s..lx.i])
             .ok()
             .and_then(|x| x.parse().ok())
-            .ok_or("bad entity id")?;
+            .ok_or("an entity id is not valid")?;
         lx.expect(b'=')?;
         let parts = if lx.peek() == Some(b'(') {
             lx.i += 1;
@@ -279,7 +282,7 @@ pub fn parse(bytes: &[u8]) -> Result<HashMap<u32, Entity>, String> {
             while lx.peek() != Some(b')') {
                 let n = lx.ident();
                 if n.is_empty() {
-                    return Err(format!("bad complex entity #{id}"));
+                    return Err(format!("the complex entity #{id} is not valid"));
                 }
                 parts.push((n, lx.args()?));
             }

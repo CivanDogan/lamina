@@ -10,7 +10,7 @@ use crate::project::Project;
 pub struct Status {
     pub name: String,
     pub path: String,
-    /// Outline bounding box, when set.
+    /// The bounding box of the outline, if the outline is set.
     pub outline: Option<Rect>,
     pub copper_layers: u8,
     pub thickness: f64,
@@ -27,15 +27,15 @@ pub struct Status {
     pub open_notes: usize,
     pub errors: usize,
     pub warnings: usize,
-    /// Count of violations per rule.
+    /// The number of violations for each rule.
     pub by_rule: BTreeMap<String, usize>,
-    /// Design source file, when the board is built from one.
+    /// The design source file, if the board is built from a source file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    /// Files generated from the source; edit the source, not these.
+    /// The files that the source generates. Edit the source, not these files.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub generated: Vec<String>,
-    /// Workspace root, when the board belongs to one.
+    /// The workspace root, if the board is in a workspace.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
     /// Part groups (block instances) and their parts.

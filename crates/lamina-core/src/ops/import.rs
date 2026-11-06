@@ -1,5 +1,5 @@
-//! Open a board file from another program: a KiCad board, an EasyEDA board
-//! or a set of Gerbers is imported into a Lamina project folder.
+//! Open a board file from another program. Lamina imports a KiCad board, an
+//! EasyEDA board or a set of Gerbers into a Lamina project folder.
 
 use std::path::{Path, PathBuf};
 
@@ -9,7 +9,7 @@ use lamina_model::*;
 use crate::ops::{ImportEasyedaBoard, ImportGerbers, ImportKicadBoard};
 use crate::project::{OpResult, Project};
 
-/// Kinds of board files that can be opened directly.
+/// The types of board files that Lamina can open directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoardFile {
     Kicad,
@@ -29,8 +29,8 @@ fn ext(p: &Path) -> String {
         .to_ascii_lowercase()
 }
 
-/// What `p` is, if it can be opened: a `.kicad_pcb`, an EasyEDA `.json`,
-/// a Gerber zip or a folder (or file) of Gerbers.
+/// The type of `p`, if Lamina can open it: a `.kicad_pcb`, an EasyEDA `.json`,
+/// a Gerber zip, or a folder (or file) of Gerbers.
 pub fn board_file_kind(p: &Path) -> Option<BoardFile> {
     if p.is_dir() {
         let has_gerbers = std::fs::read_dir(p)
@@ -48,7 +48,7 @@ pub fn board_file_kind(p: &Path) -> Option<BoardFile> {
     }
 }
 
-/// 64-bit FNV-1a: stable across builds, unlike the std hasher.
+/// 64-bit FNV-1a. It gives the same result in all builds, but the std hasher does not.
 fn fnv(s: &str) -> u64 {
     s.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
         (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3)
@@ -64,16 +64,16 @@ fn data_dir() -> PathBuf {
         .join("lamina")
 }
 
-/// The project folder an opened board file is imported into: one per
-/// source path, under the user's local data folder.
+/// The project folder that an opened board file is imported into. There is
+/// one folder for each source path, in the local data folder of the user.
 pub fn import_dir_for(file: &Path) -> PathBuf {
     import_dir_in(&data_dir().join("imports"), file)
 }
 
-/// Like [`import_dir_for`], under `base`.
+/// Like [`import_dir_for`], but in `base`.
 pub fn import_dir_in(base: &Path, file: &Path) -> PathBuf {
     let abs = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
-    // A single Gerber stands for its whole folder.
+    // For a single Gerber file, use its folder.
     let src = if !abs.is_dir()
         && matches!(board_file_kind(&abs), Some(BoardFile::Gerbers))
         && ext(&abs) != "zip"
@@ -103,8 +103,9 @@ fn modified(p: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
 }
 
-/// When a source last changed: a file's own time, or the newest file in a
-/// folder (a folder's own time ignores files edited in place).
+/// The time of the last change to a source. For a file, this is the time of
+/// the file. For a folder, it is the time of the newest file in it, because
+/// the time of a folder does not change when a file in it is edited in place.
 fn source_modified(p: &Path) -> Option<std::time::SystemTime> {
     let dir = if p.is_dir() {
         Some(p.to_path_buf())
@@ -123,11 +124,12 @@ fn source_modified(p: &Path) -> Option<std::time::SystemTime> {
     }
 }
 
-/// Import `file` into `dir`, replacing a board already there.
+/// Import `file` into `dir`. This replaces a board that is already there.
 pub fn import_board_file(file: &Path, dir: &Path) -> Result<OpResult> {
     let kind = board_file_kind(file).ok_or_else(|| {
         Error::invalid(format!(
-            "{} is not a board file Lamina can open (KiCad .kicad_pcb, EasyEDA .json, Gerbers)",
+            "{} is not a board file that Lamina can open. \
+             Use a KiCad .kicad_pcb file, an EasyEDA .json file or Gerbers.",
             file.display()
         ))
     })?;
@@ -167,15 +169,15 @@ pub fn import_board_file(file: &Path, dir: &Path) -> Result<OpResult> {
     }
 }
 
-/// The Lamina project for `path`: the folder itself when it is one, else
-/// the import folder of a board file, imported again when the source is
-/// newer than the import. Returns the folder and the import result when an
-/// import ran.
+/// The Lamina project for `path`. If `path` is a project folder, this is the
+/// folder. If not, it is the import folder of the board file. Lamina imports
+/// the file again if the source is newer than the import. Returns the folder,
+/// and the import result if an import ran.
 pub fn open_board_path(path: &Path) -> Result<(PathBuf, Option<OpResult>)> {
     open_board_path_in(&data_dir().join("imports"), path)
 }
 
-/// Like [`open_board_path`], with imports under `base`.
+/// Like [`open_board_path`], but with the imports in `base`.
 pub fn open_board_path_in(base: &Path, path: &Path) -> Result<(PathBuf, Option<OpResult>)> {
     if ProjectData::is_project(path) {
         return Ok((path.to_path_buf(), None));
@@ -216,7 +218,7 @@ mod tests {
         std::fs::write(g.join("b.GTL"), "").unwrap();
         assert_eq!(board_file_kind(&g), Some(BoardFile::Gerbers));
         assert_eq!(board_file_kind(&g.join("b.GTL")), Some(BoardFile::Gerbers));
-        // A single Gerber maps to its folder's import.
+        // A single Gerber file uses the import of its folder.
         assert_eq!(import_dir_for(&g.join("b.GTL")), import_dir_for(&g));
         assert_ne!(import_dir_for(&k), import_dir_for(&g));
         assert_eq!(board_file_kind(&t.path().join("x.txt")), None);
@@ -239,11 +241,11 @@ mod tests {
         assert!(first.is_some());
         assert!(dir.starts_with(&base));
         assert!(ProjectData::is_project(&dir));
-        // Unchanged source: the import is reused.
+        // If the source did not change, the import is used again.
         let (again, second) = open_board_path_in(&base, &file).unwrap();
         assert_eq!(again, dir);
         assert!(second.is_none());
-        // Newer source: imported again.
+        // If the source is newer, Lamina imports it again.
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
         std::fs::File::options()
             .write(true)
@@ -252,11 +254,11 @@ mod tests {
             .set_modified(later)
             .unwrap();
         assert!(open_board_path_in(&base, &file).unwrap().1.is_some());
-        // A project folder opens as itself.
+        // A project folder opens directly.
         let (same, ran) = open_board_path_in(&base, &dir).unwrap();
         assert_eq!(same, dir);
         assert!(ran.is_none());
-        // Something else is refused with a clear message.
+        // Other files are refused with a clear message.
         let txt = t.path().join("notes.txt");
         std::fs::write(&txt, "x").unwrap();
         let e = open_board_path_in(&base, &txt).unwrap_err().to_string();

@@ -1,4 +1,4 @@
-//! Print a model's bounds: `bounds <file>`.
+//! Print the bounds of a model: `bounds <file>`.
 fn main() {
     let p = std::path::PathBuf::from(std::env::args().nth(1).expect("file"));
     let t = std::time::Instant::now();

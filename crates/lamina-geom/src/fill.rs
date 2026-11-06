@@ -1,5 +1,5 @@
-//! Copper pour fill: zone outline minus everything it must keep clear of,
-//! with thermal spokes to its own pads and unconnected islands removed.
+//! The copper pour fill: the zone outline minus all items that it must keep clear
+//! of. It has thermal spokes to its own pads. Islands with no connection are removed.
 
 use geo::{Area, BooleanOps, Buffer, Coord, LineString, MultiPolygon, Polygon};
 use lamina_model::*;
@@ -26,7 +26,7 @@ fn mp(p: Polygon<f64>) -> MultiPolygon<f64> {
     MultiPolygon::new(vec![p])
 }
 
-/// Prim grown by `d` (exact for circles and capsules).
+/// The prim made larger by `d` (exact for circles and capsules).
 pub fn inflate(p: &Prim, d: f64) -> MultiPolygon<f64> {
     match p {
         Prim::Circle { c, r } => mp(gpoly(&circle_points(*c, r + d, TOL))),
@@ -43,7 +43,7 @@ pub fn inflate(p: &Prim, d: f64) -> MultiPolygon<f64> {
 }
 
 fn union_all(items: Vec<MultiPolygon<f64>>) -> MultiPolygon<f64> {
-    // Pairwise tree union keeps each step small.
+    // A pairwise tree union keeps each step small.
     let mut layer = items;
     while layer.len() > 1 {
         let mut next = Vec::with_capacity(layer.len().div_ceil(2));
@@ -90,7 +90,7 @@ fn to_prims(m: &MultiPolygon<f64>) -> Vec<Prim> {
         .collect()
 }
 
-/// Computed fill of one zone on one layer.
+/// The calculated fill of one zone on one layer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ZoneFill {
     pub zone: String,
@@ -115,8 +115,8 @@ impl FillPolygon {
     }
 }
 
-/// Fill every zone. Higher priority zones fill first and are obstacles for
-/// lower priority zones of other nets.
+/// Fills all zones. Zones with a higher priority fill first. They are obstacles
+/// for zones of other nets that have a lower priority.
 pub fn fill_zones(d: &ProjectData, g: &BoardGeometry) -> Vec<ZoneFill> {
     let rules = &d.board.rules;
     let layers = g.layers;
@@ -218,7 +218,7 @@ pub fn fill_zones(d: &ProjectData, g: &BoardGeometry) -> Vec<ZoneFill> {
 
             let blocked = union_all(obstacles);
             let mut fill = region.difference(&blocked);
-            // Drop necks thinner than the minimum width.
+            // Remove necks that are thinner than the minimum width.
             fill = fill.buffer(-min_w / 2.0).buffer(min_w / 2.0);
 
             if !thermal.is_empty() {
@@ -259,7 +259,7 @@ pub fn fill_zones(d: &ProjectData, g: &BoardGeometry) -> Vec<ZoneFill> {
                 fill = fill.union(&spokes);
             }
 
-            // Keep only pieces that touch copper of the zone's net.
+            // Keep only the pieces that touch copper of the net of the zone.
             let prims = to_prims(&fill);
             let kept: Vec<Prim> = if z.net.is_some() {
                 prims

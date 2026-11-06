@@ -10,15 +10,16 @@ use crate::project::{OpResult, Project, Touched};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SearchPart {
-    /// Keywords, MPN or LCSC number, e.g. `AMS1117-3.3`, `0603 10k`, `C6186`.
+    /// Keywords, an MPN or an LCSC number, for example `AMS1117-3.3`, `0603 10k`
+    /// or `C6186`.
     pub query: String,
-    /// Maximum results (default 10).
+    /// The maximum number of results (default 10).
     #[serde(default)]
     pub limit: Option<usize>,
-    /// Only JLCPCB basic parts.
+    /// Find only JLCPCB basic parts.
     #[serde(default)]
     pub basic_only: bool,
-    /// Drop parts with no stock (default true).
+    /// Remove the parts that have no stock from the results (default true).
     #[serde(default = "yes")]
     pub in_stock: bool,
 }
@@ -29,24 +30,24 @@ fn yes() -> bool {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ImportLcsc {
-    /// LCSC number, e.g. `C6186`.
+    /// The LCSC number, for example `C6186`.
     pub lcsc: String,
     /// Also add a part with this refdes.
     #[serde(default)]
     pub refdes: Option<String>,
-    /// Part value (defaults to the MPN).
+    /// The part value (default: the MPN).
     #[serde(default)]
     pub value: Option<String>,
-    /// Footprint id to use instead of the EasyEDA package name.
+    /// The footprint id to use instead of the EasyEDA package name.
     #[serde(default)]
     pub footprint_id: Option<String>,
-    /// Download again instead of using the project cache.
+    /// Download the data again. Do not use the project cache.
     #[serde(default)]
     pub refresh: bool,
     /// Also download the STEP model (default true).
     #[serde(default = "yes")]
     pub step: bool,
-    /// Replace an existing part with the same refdes.
+    /// Replace a part that has the same refdes.
     #[serde(default)]
     pub replace: bool,
     #[serde(default)]
@@ -86,7 +87,9 @@ fn read_cached(path: &Path) -> Option<String> {
 impl Project {
     pub fn search_part(&self, p: SearchPart) -> Result<Vec<PartHit>> {
         if p.query.trim().is_empty() {
-            return Err(Error::invalid("query is empty"));
+            return Err(Error::invalid(
+                "The query is empty. Give one or more keywords.",
+            ));
         }
         let limit = p.limit.unwrap_or(10).clamp(1, 50);
         let mut hits = self
@@ -129,7 +132,7 @@ impl Project {
         let reuse = !p.refresh && d.footprints.contains_key(&fp_id);
         if reuse {
             notes.push(format!(
-                "footprint `{fp_id}` already in the project, kept as is"
+                "The footprint `{fp_id}` is already in the project. It is kept as is."
             ));
         } else {
             if let Some(info) = &im.model {
@@ -139,7 +142,7 @@ impl Project {
                     im.footprint.height = h;
                 }
             } else {
-                notes.push("EasyEDA has no 3D model for this footprint".into());
+                notes.push("EasyEDA has no 3D model for this footprint.".into());
             }
             touched = touched.footprint(fp_id.clone());
             d.footprints.insert(fp_id.clone(), im.footprint.clone());
@@ -186,18 +189,18 @@ impl Project {
             }
             fields.push(format!("lcsc: '{lcsc}'"));
             notes.push(format!(
-                "parts.json is generated from {}; add the part there: {r}: {{ {} }}",
+                "parts.json is generated from {}. Add the part there: {r}: {{ {} }}",
                 lamina_build::SOURCE_FILE,
                 fields.join(", ")
             ));
             summary = format!("{r} not added (see notes): {summary}");
         } else if let Some(r) = p.refdes {
             if !valid_refdes(&r) {
-                return Err(Error::invalid(format!("bad refdes `{r}`")));
+                return Err(Error::invalid(format!("The refdes `{r}` is not valid.")));
             }
             if d.parts.parts.contains_key(&r) && !p.replace {
                 return Err(Error::invalid(format!(
-                    "{r} exists; pass replace: true to change it"
+                    "{r} already exists. Set replace: true to change it."
                 )));
             }
             let mut part = Part::new(fp_id.clone());
@@ -215,7 +218,7 @@ impl Project {
         Ok(res)
     }
 
-    /// Import several LCSC parts; stops at the first error.
+    /// Import more than one LCSC part. Stop at the first error.
     pub fn import_many(&mut self, p: ImportMany) -> Result<Vec<OpResult>> {
         let mut out = Vec::new();
         for item in p.parts {
@@ -242,12 +245,13 @@ pub fn natural(a: &str, b: &str) -> std::cmp::Ordering {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ImportEasyedaBoard {
-    /// Path of the EasyEDA PCB JSON (File > Export > EasyEDA in the standard editor).
+    /// The path of the EasyEDA PCB JSON file (File > Export > EasyEDA in the
+    /// standard editor).
     pub path: String,
-    /// Fetch the parts' 3D models from EasyEDA (default true).
+    /// Download the 3D models of the parts from EasyEDA (default true).
     #[serde(default = "yes")]
     pub models: bool,
-    /// Replace a project that already has a board.
+    /// Replace the board if the project already has one.
     #[serde(default)]
     pub replace: bool,
     #[serde(default)]
@@ -255,7 +259,7 @@ pub struct ImportEasyedaBoard {
 }
 
 impl Project {
-    /// Get an EasyEDA 3D model into `cache/models/lcsc/`, STEP when it loads.
+    /// Put an EasyEDA 3D model into `cache/models/lcsc/`. Use the STEP file if it loads.
     pub(crate) fn fetch_easyeda_model(
         &self,
         info: &lamina_parts::ModelInfo,
@@ -271,13 +275,13 @@ impl Project {
             None => match self.source().model_obj(&info.uuid) {
                 Ok(t) => {
                     if let Err(e) = write_atomic(&obj_path, t.as_bytes()) {
-                        notes.push(format!("3D model not saved: {e}"));
+                        notes.push(format!("The 3D model was not saved: {e}"));
                         return None;
                     }
                     t
                 }
                 Err(e) => {
-                    notes.push(format!("3D model not downloaded: {e}"));
+                    notes.push(format!("The 3D model was not downloaded: {e}"));
                     return None;
                 }
             },
@@ -292,18 +296,20 @@ impl Project {
                 match self.source().model_step(&info.uuid) {
                     Ok(b) => {
                         if let Err(e) = write_atomic(&step_path, &b) {
-                            notes.push(format!("STEP not saved: {e}"));
+                            notes.push(format!("The STEP file was not saved: {e}"));
                         }
                     }
-                    Err(e) => notes.push(format!("STEP not downloaded: {e}")),
+                    Err(e) => notes.push(format!("The STEP file was not downloaded: {e}")),
                 }
             }
-            // The STEP has the same geometry in the same frame with smooth
-            // surfaces; use it when it loads.
+            // The STEP file has the same geometry in the same frame, but with
+            // smooth surfaces. Use it if it loads.
             if step_path.exists() {
                 match lamina_step::load(&step_path) {
                     Ok(_) => model.file = rel_step,
-                    Err(e) => notes.push(format!("STEP did not load, using OBJ: {e}")),
+                    Err(e) => notes.push(format!(
+                        "The STEP file did not load, so Lamina uses the OBJ file: {e}"
+                    )),
                 }
             }
         }
@@ -328,7 +334,7 @@ impl Project {
             || cur.board.outline.is_some();
         if has_board && !p.replace {
             return Err(Error::Refused(
-                "the project already has a board; pass replace: true to overwrite it".into(),
+                "The project already has a board. Set replace: true to replace it.".into(),
             ));
         }
         let imported = lamina_parts::board::import_board(&doc, &name).map_err(Error::Invalid)?;

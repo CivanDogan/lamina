@@ -1,11 +1,11 @@
-//! JSON output tuned for readable git diffs: small objects and arrays stay
-//! on one line, numbers are rounded to 1 nm.
+//! JSON output that makes git diffs easy to read. Small objects and arrays
+//! stay on one line. Numbers are rounded to 1 nm.
 
 use serde_json::Value;
 
 const INLINE_WIDTH: usize = 76;
 
-/// Round to 6 decimals (1 nm when the unit is mm).
+/// Rounds to 6 decimals (1 nm if the unit is mm).
 pub fn round6(v: f64) -> f64 {
     let r = (v * 1e6).round() / 1e6;
     if r == 0.0 { 0.0 } else { r }
@@ -77,7 +77,7 @@ fn depth(v: &Value) -> usize {
 fn pretty(v: &Value, indent: usize, out: &mut String) {
     let mut one = String::new();
     compact(v, &mut one);
-    // Keep short values inline, but never collapse deep structures.
+    // Keep short values on one line. Never put deep structures on one line.
     if one.len() + indent <= INLINE_WIDTH && depth(v) <= 2 {
         out.push_str(&one);
         return;
@@ -117,7 +117,7 @@ fn pretty(v: &Value, indent: usize, out: &mut String) {
     }
 }
 
-/// Serialize to the project's JSON style, with a trailing newline.
+/// Serializes to the JSON style of the project, with a newline at the end.
 pub fn to_string<T: serde::Serialize>(v: &T) -> serde_json::Result<String> {
     let value = serde_json::to_value(v)?;
     let mut out = String::new();

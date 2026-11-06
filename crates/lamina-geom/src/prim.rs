@@ -3,7 +3,7 @@
 use lamina_model::{Point, Rect};
 
 /// A copper shape. Tracks and oval pads are capsules (a segment with round
-/// ends); rectangular and custom pads and pour fills are polygons.
+/// ends). Rectangular pads, custom pads and pour fills are polygons.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Prim {
     Circle {
@@ -15,8 +15,8 @@ pub enum Prim {
         b: Point,
         r: f64,
     },
-    /// Outer ring counter-clockwise, holes clockwise. Rings are not closed
-    /// (the last point does not repeat the first).
+    /// The outer ring is counter-clockwise. Holes are clockwise. Rings are not
+    /// closed (the last point is not the same as the first).
     Poly {
         outer: Vec<Point>,
         holes: Vec<Vec<Point>>,
@@ -68,7 +68,7 @@ impl Prim {
         }
     }
 
-    /// Edge-to-edge distance; 0 when the shapes touch or overlap.
+    /// The edge-to-edge distance. It is 0 if the shapes touch or overlap.
     pub fn distance(&self, o: &Prim) -> f64 {
         use Prim::*;
         let d = match (self, o) {
@@ -137,7 +137,7 @@ impl Prim {
         }
     }
 
-    /// Polygon outline (circles and capsules flattened), for drawing and fills.
+    /// The polygon outline (circles and capsules are flattened), for drawings and fills.
     pub fn outline(&self, tol: f64) -> Vec<Point> {
         match self {
             Prim::Circle { c, r } => circle_points(*c, *r, tol),
@@ -202,7 +202,7 @@ pub fn ring_contains(r: &[Point], p: Point) -> bool {
     inside
 }
 
-/// Distance from point `p` to segment `a`-`b`.
+/// The distance from point `p` to segment `a`-`b`.
 pub fn seg_point(a: Point, b: Point, p: Point) -> f64 {
     let ab = b.sub(a);
     let len2 = ab.x * ab.x + ab.y * ab.y;
@@ -226,7 +226,7 @@ pub fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
         && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))
 }
 
-/// Distance between segments; 0 when they cross.
+/// The distance between segments. It is 0 if they cross.
 pub fn seg_seg(a: Point, b: Point, c: Point, d: Point) -> f64 {
     if segments_intersect(a, b, c, d) {
         return 0.0;
@@ -255,7 +255,7 @@ fn segments_for(r: f64, tol: f64, sweep: f64) -> usize {
     ((sweep / step).ceil() as usize).clamp(8, 256)
 }
 
-/// Capsule outline, counter-clockwise.
+/// The capsule outline, counter-clockwise.
 pub fn capsule_points(a: Point, b: Point, r: f64, tol: f64) -> Vec<Point> {
     if a.dist(b) < 1e-12 {
         return circle_points(a, r, tol);
@@ -263,7 +263,7 @@ pub fn capsule_points(a: Point, b: Point, r: f64, tol: f64) -> Vec<Point> {
     let ang = (b.y - a.y).atan2(b.x - a.x);
     let n = segments_for(r, tol, std::f64::consts::PI).max(4);
     let mut out = Vec::with_capacity(2 * n + 2);
-    // Half circle around b from -90 to +90 degrees, then around a.
+    // A half circle around b from -90 to +90 degrees, then around a.
     for i in 0..=n {
         let t = ang - std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * i as f64 / n as f64;
         out.push(Point::new(b.x + r * t.cos(), b.y + r * t.sin()));
@@ -308,7 +308,7 @@ mod tests {
         assert_eq!(b.distance(&s), 0.0);
         let s2 = sq(10.0, 0.0, 1.0);
         assert!((s.distance(&s2) - 6.0).abs() < 1e-12);
-        // Capsule crossing a square without endpoints inside.
+        // A capsule that crosses a square, with no endpoints in the square.
         let c = Prim::Capsule {
             a: Point::new(1.0, 0.0),
             b: Point::new(5.0, 0.0),
@@ -351,9 +351,9 @@ mod tests {
     }
 }
 
-/// A polygon with an index over its edges, for fast inside and touch tests
-/// against small shapes (a pour piece of thousands of edges against pads
-/// and tracks).
+/// A polygon with an index of its edges, for fast inside and touch tests
+/// with small shapes (for example, a pour piece with thousands of edges,
+/// tested against pads and tracks).
 pub struct IndexedPoly {
     edges: Vec<(Point, Point)>,
     index: crate::Index,
@@ -381,8 +381,8 @@ impl IndexedPoly {
         IndexedPoly { edges, index, bbox }
     }
 
-    /// Even-odd inside test (holes excluded), counting only the edges a
-    /// ray to +x can cross.
+    /// An even-odd inside test (holes are not included). It counts only the edges
+    /// that a ray to +x can cross.
     pub fn contains(&self, p: Point) -> bool {
         if p.x < self.bbox.min.x
             || p.x > self.bbox.max.x
@@ -408,7 +408,7 @@ impl IndexedPoly {
         inside
     }
 
-    /// Whether two indexed polygons overlap or come within `eps`.
+    /// True if two indexed polygons overlap or come within `eps`.
     pub fn touches_poly(&self, o: &IndexedPoly, eps: f64) -> bool {
         let (a, b) = (&self.bbox, &o.bbox);
         if a.max.x + eps < b.min.x
@@ -431,7 +431,7 @@ impl IndexedPoly {
         })
     }
 
-    /// Whether `prim` overlaps the polygon or comes within `eps` of it.
+    /// True if `prim` overlaps the polygon or comes within `eps` of it.
     pub fn touches(&self, prim: &Prim, eps: f64) -> bool {
         let bb = prim.bbox();
         let near = |r: f64| self.index.near(&bb, r + eps);
@@ -453,7 +453,7 @@ impl IndexedPoly {
                 let n = outer.len();
                 near(0.0).any(|k| {
                     let (a, b) = self.edges[k];
-                    // The pour edge runs inside the pad, or the edges meet.
+                    // The pour edge goes through the inside of the pad, or the edges meet.
                     prim.contains(a)
                         || (0..n).any(|i| seg_seg(a, b, outer[i], outer[(i + 1) % n]) <= eps)
                 })
@@ -495,20 +495,20 @@ mod indexed_tests {
             let p = Point::new(x, y);
             assert_eq!(ip.contains(p), plain.contains(p), "{p:?}");
         }
-        // A track ending in the hole but crossing the pour touches it.
+        // A track that ends in the hole but crosses the pour touches it.
         let t = Prim::Capsule {
             a: Point::new(5.0, 5.0),
             b: Point::new(5.0, 3.0),
             r: 0.1,
         };
         assert!(ip.touches(&t, 1e-6));
-        // A via fully inside the hole, clear of its edges, does not.
+        // A via fully in the hole, clear of its edges, does not touch it.
         let v = Prim::Circle {
             c: Point::new(5.0, 5.0),
             r: 0.3,
         };
         assert!(!ip.touches(&v, 1e-6));
-        // A pad overlapping the outer edge does.
+        // A pad that overlaps the outer edge touches it.
         let pad = Prim::Poly {
             outer: vec![
                 Point::new(9.5, 2.0),

@@ -1,4 +1,4 @@
-//! KiCad footprints and boards in and out.
+//! Import and export of KiCad footprints and boards.
 
 use std::path::{Path, PathBuf};
 
@@ -16,9 +16,9 @@ fn yes() -> bool {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SearchKicadFootprints {
-    /// Words that must all appear in `Library:Name`, e.g. `sot-23`, `qfn 32 0.5`.
+    /// Words that must all be in `Library:Name`, for example `sot-23` or `qfn 32 0.5`.
     pub query: String,
-    /// Maximum results (default 20).
+    /// The maximum number of results (default 20).
     #[serde(default)]
     pub limit: Option<usize>,
 }
@@ -26,7 +26,7 @@ pub struct SearchKicadFootprints {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct KicadSearch {
     pub hits: Vec<library::Hit>,
-    /// Library folders that were searched.
+    /// The number of library folders that Lamina searched.
     pub libraries: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
@@ -34,25 +34,25 @@ pub struct KicadSearch {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ImportKicadFootprint {
-    /// `Library:Name` such as `Resistor_SMD:R_0603_1608Metric`, a footprint
-    /// name to look up in local libraries, or a path to a `.kicad_mod` file.
+    /// `Library:Name` (for example `Resistor_SMD:R_0603_1608Metric`), a footprint
+    /// name to find in the local libraries, or the path of a `.kicad_mod` file.
     pub footprint: String,
     /// Also add a part with this refdes.
     #[serde(default)]
     pub refdes: Option<String>,
     #[serde(default)]
     pub value: Option<String>,
-    /// Footprint id to use instead of the KiCad name.
+    /// The footprint id to use instead of the KiCad name.
     #[serde(default)]
     pub footprint_id: Option<String>,
     /// Also get the STEP model (default true).
     #[serde(default = "yes")]
     pub model: bool,
-    /// Fetch from the official KiCad libraries when not found locally
-    /// (default true; needs `Library:Name`).
+    /// If the footprint is not in the local libraries, download it from the
+    /// official KiCad libraries (default true). This needs `Library:Name`.
     #[serde(default = "yes")]
     pub online: bool,
-    /// Replace an existing footprint or part with the same id.
+    /// Replace a footprint or a part that has the same id.
     #[serde(default)]
     pub replace: bool,
     #[serde(default)]
@@ -61,15 +61,16 @@ pub struct ImportKicadFootprint {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ImportKicadBoard {
-    /// Path of the `.kicad_pcb` file.
+    /// The path of the `.kicad_pcb` file.
     pub path: String,
-    /// Resolve 3D models from local KiCad libraries (default true).
+    /// Find the 3D models in the local KiCad libraries (default true).
     #[serde(default = "yes")]
     pub models: bool,
-    /// Also fetch missing STEP models online (default false; slow for big boards).
+    /// Also download the STEP models that are not found locally (default false).
+    /// This is slow for large boards.
     #[serde(default)]
     pub online: bool,
-    /// Replace a project that already has a board.
+    /// Replace the board if the project already has one.
     #[serde(default)]
     pub replace: bool,
     #[serde(default)]
@@ -78,7 +79,7 @@ pub struct ImportKicadBoard {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ExportKicad {
-    /// Output file (default `output/<board name>.kicad_pcb` in the project).
+    /// The output file. The default is `output/<board name>.kicad_pcb` in the project.
     #[serde(default)]
     pub path: Option<String>,
 }
@@ -115,8 +116,9 @@ impl Project {
         let hits = library::search(&dirs, &p.query, p.limit.unwrap_or(20));
         let hint = if libraries == 0 {
             Some(
-                "no local KiCad libraries (set kicad_footprints in lamina.json or KICAD9_FOOTPRINT_DIR); \
-                 import_kicad_footprint with `Library:Name` fetches from the official libraries online"
+                "There are no local KiCad libraries. Set kicad_footprints in lamina.json, \
+                 or set KICAD9_FOOTPRINT_DIR. Also, import_kicad_footprint with `Library:Name` \
+                 downloads from the official online libraries."
                     .into(),
             )
         } else {
@@ -129,7 +131,7 @@ impl Project {
         })
     }
 
-    /// Get the STEP model of a KiCad footprint into `cache/models/kicad/`.
+    /// Put the STEP model of a KiCad footprint into `cache/models/kicad/`.
     fn resolve_kicad_model(
         &self,
         fp_library: &str,
@@ -143,9 +145,9 @@ impl Project {
             .unwrap_or_else(|| (fp_library.to_string(), fp_name.to_string()));
         let rel = format!("kicad/{lib}/{name}.step");
         let dst = self.root().join(MODEL_DIR).join(&rel);
-        // `${KIPRJMOD}` is the KiCad project folder, and so is the base of a
-        // relative path without a variable. Such files are never online, and
-        // they are copied again on every import since the user may edit them.
+        // `${KIPRJMOD}` is the KiCad project folder. It is also the base of a
+        // relative path that has no variable. These files are never online.
+        // Lamina copies them again on each import, because the user can edit them.
         let in_project = m.path.starts_with("${KIPRJMOD}")
             || (!m.path.starts_with("${") && !Path::new(&m.path).is_absolute());
         let online = online && !in_project;
@@ -165,13 +167,13 @@ impl Project {
                         let _ = std::fs::create_dir_all(parent);
                     }
                     if let Err(e) = std::fs::copy(&src, &dst) {
-                        notes.push(format!("model not copied: {e}"));
+                        notes.push(format!("The model file was not copied: {e}"));
                         return None;
                     }
                 }
                 Some(src) => {
                     notes.push(format!(
-                        "only a VRML model was found locally ({}); VRML is not supported",
+                        "Only a VRML model was found locally ({}). Lamina does not support VRML.",
                         src.display()
                     ));
                     if !online {
@@ -183,7 +185,8 @@ impl Project {
             if !dst.is_file() {
                 if !online {
                     notes.push(format!(
-                        "3D model {lib}/{name} not found locally; pass online: true to fetch it"
+                        "3D model {lib}/{name} was not found in the local libraries. \
+                         Set online: true to download it."
                     ));
                     return None;
                 }
@@ -193,7 +196,7 @@ impl Project {
                             let _ = std::fs::create_dir_all(parent);
                         }
                         if let Err(e) = write_atomic(&dst, &bytes) {
-                            notes.push(format!("model not saved: {e}"));
+                            notes.push(format!("The model file was not saved: {e}"));
                             return None;
                         }
                     }
@@ -219,15 +222,15 @@ impl Project {
                 ))
             }
             Err(e) => {
-                notes.push(format!("STEP model did not load: {e}"));
+                notes.push(format!("The STEP model did not load: {e}"));
                 None
             }
         }
     }
 
-    /// The first of a footprint's models that resolves: every model locally
-    /// first, then online. Notes of the failed tries are kept only when none
-    /// resolves.
+    /// The first model of a footprint that resolves. Lamina tries all models
+    /// locally first, then online. It keeps the notes of the failed tries only
+    /// if no model resolves.
     fn resolve_kicad_models(
         &self,
         fp_library: &str,
@@ -277,7 +280,8 @@ impl Project {
         } else if p.online {
             let (lib, name) = spec.split_once(':').ok_or_else(|| {
                 Error::invalid(format!(
-                    "`{spec}` was not found in local KiCad libraries; give `Library:Name` to fetch it online"
+                    "`{spec}` was not found in the local KiCad libraries. \
+                     Give `Library:Name` to download it from the online libraries."
                 ))
             })?;
             let text = self
@@ -291,7 +295,8 @@ impl Project {
             )
         } else {
             return Err(Error::invalid(format!(
-                "`{spec}` was not found in local KiCad libraries"
+                "`{spec}` was not found in the local KiCad libraries. \
+                 Give `Library:Name` and set online: true to download it."
             )));
         };
         let inst =
@@ -302,7 +307,7 @@ impl Project {
         }
         if !valid_id(&fp.id) {
             return Err(Error::invalid(format!(
-                "footprint id `{}` is not file-safe",
+                "The footprint id `{}` cannot be used as a file name. Set footprint_id to a different id.",
                 fp.id
             )));
         }
@@ -312,12 +317,12 @@ impl Project {
         let fp_id = fp.id.clone();
         if d.footprints.contains_key(&fp_id) && !p.replace {
             notes.push(format!(
-                "footprint `{fp_id}` already in the project, kept as is"
+                "The footprint `{fp_id}` is already in the project. It is kept as is."
             ));
         } else {
             if p.model {
                 if !inst.models.is_empty() {
-                    // A footprint file's project is the folder above its `.pretty`.
+                    // The project of a footprint file is the folder above its `.pretty` folder.
                     let dir = as_path.parent().filter(|_| as_path.is_file()).map(|d| {
                         match d.extension() {
                             Some(e) if e == "pretty" => d.parent().unwrap_or(d),
@@ -336,7 +341,7 @@ impl Project {
                         fp.height = h;
                     }
                 } else {
-                    notes.push("the footprint names no 3D model".into());
+                    notes.push("The footprint does not name a 3D model.".into());
                 }
             }
             touched = touched.footprint(fp_id.clone());
@@ -351,18 +356,22 @@ impl Project {
         if let Some(r) = p.refdes.as_deref() {
             if parts_generated {
                 notes.push(format!(
-                    "parts.json is generated from {}; add the part there: {r}: {{ footprint: '{fp_id}'{} }}",
+                    "parts.json is generated from {}. Add the part there: \
+                     {r}: {{ footprint: '{fp_id}'{} }}",
                     lamina_build::SOURCE_FILE,
-                    p.value.as_deref().map(|v| format!(", value: '{v}'")).unwrap_or_default()
+                    p.value
+                        .as_deref()
+                        .map(|v| format!(", value: '{v}'"))
+                        .unwrap_or_default()
                 ));
                 summary = format!("{r} not added (see notes): {summary}");
             } else {
                 if !valid_refdes(r) {
-                    return Err(Error::invalid(format!("bad refdes `{r}`")));
+                    return Err(Error::invalid(format!("The refdes `{r}` is not valid.")));
                 }
                 if d.parts.parts.contains_key(r) && !p.replace {
                     return Err(Error::invalid(format!(
-                        "{r} exists; pass replace: true to change it"
+                        "{r} already exists. Set replace: true to change it."
                     )));
                 }
                 let mut part = Part::new(fp_id.clone());
@@ -392,7 +401,7 @@ impl Project {
             || cur.board.outline.is_some();
         if has_board && !p.replace {
             return Err(Error::Refused(
-                "the project already has a board; pass replace: true to overwrite it".into(),
+                "The project already has a board. Set replace: true to replace it.".into(),
             ));
         }
         let imported = lamina_kicad::import_board(&text, &name).map_err(Error::Invalid)?;
@@ -435,7 +444,7 @@ impl Project {
                 "3D models: {found} of {} resolved{}",
                 imported.models.len(),
                 if found < imported.models.len() && !p.online {
-                    " (pass online: true to fetch the rest)"
+                    ". Set online: true to download the others."
                 } else {
                     ""
                 }

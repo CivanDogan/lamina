@@ -10,14 +10,14 @@ use crate::project::Project;
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RenderView {
-    /// Technical layer view in layer colours (default).
+    /// A technical view of the layers, in layer colours (default).
     #[default]
     Layers,
-    /// Finished board from the top: mask, finish, silkscreen.
+    /// The finished board from the top, with the mask, the finish and the silkscreen.
     Top,
-    /// Finished board from below (mirrored).
+    /// The finished board from the bottom (mirrored).
     Bottom,
-    /// Perspective 3D view with part models.
+    /// A perspective 3D view with the part models.
     #[serde(rename = "3d")]
     View3D,
 }
@@ -26,12 +26,12 @@ pub enum RenderView {
 pub struct Render {
     #[serde(default)]
     pub view: RenderView,
-    /// Layers for the `layers` view, e.g. `["top", "top.silk", "outline", "ratsnest"]`.
-    /// Also: `bottom`, `in1`, `*.mask`, `*.paste`, `*.courtyard`, `*.fab`,
-    /// `drills`, `keepout`, `drc`.
+    /// The layers for the `layers` view, for example
+    /// `["top", "top.silk", "outline", "ratsnest"]`. Other valid names are `bottom`,
+    /// `in1`, `*.mask`, `*.paste`, `*.courtyard`, `*.fab`, `drills`, `keepout` and `drc`.
     #[serde(default)]
     pub layers: Option<Vec<String>>,
-    /// Zoom to this box (mm) in 2D views.
+    /// In 2D views, zoom to this box (mm).
     #[serde(default)]
     pub region: Option<Rect>,
     /// Image width in pixels (default 1400).
@@ -43,10 +43,10 @@ pub struct Render {
     /// 3D camera angle around the board in degrees (default -62).
     #[serde(default)]
     pub yaw: Option<f32>,
-    /// 3D camera elevation in degrees (default 38; 90 looks straight down).
+    /// 3D camera elevation in degrees (default 38). At 90, the camera looks straight down.
     #[serde(default)]
     pub pitch: Option<f32>,
-    /// File name in cache/render (default from the view).
+    /// The file name in cache/render. The default is the name of the view.
     #[serde(default)]
     pub name: Option<String>,
 }
@@ -99,8 +99,9 @@ impl Project {
                 let mut v = Vec::new();
                 for n in names {
                     v.push(
-                        parse_scene_layer(n, self.data.board.stackup.copper_layers)
-                            .ok_or_else(|| Error::invalid(format!("unknown layer `{n}`")))?,
+                        parse_scene_layer(n, self.data.board.stackup.copper_layers).ok_or_else(
+                            || Error::invalid(format!("The layer `{n}` is unknown.")),
+                        )?,
                     );
                 }
                 Some(v)
@@ -155,7 +156,7 @@ impl Project {
                 .collect();
             if !missing.is_empty() {
                 notes.push(format!(
-                    "no 3D model, drawn as boxes: {}",
+                    "These parts have no 3D model, so they are shown as boxes: {}",
                     missing.join(" ")
                 ));
             }

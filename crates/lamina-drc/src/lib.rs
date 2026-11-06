@@ -25,9 +25,9 @@ pub struct Analysis {
     pub ratsnest: Vec<Ratsnest>,
     pub fills: Vec<ZoneFill>,
     pub geometry: BoardGeometry,
-    /// Connected-copper island of each `geometry.copper` item.
+    /// The island of connected copper for each `geometry.copper` item.
     pub island: Vec<usize>,
-    /// Island of each fill polygon, per fill (empty for non-copper layers).
+    /// The island of each fill polygon, for each fill. It is empty for layers that are not copper.
     pub fill_island: Vec<Vec<usize>>,
 }
 
@@ -68,7 +68,7 @@ fn mid(a: &Prim, b: &Prim) -> Point {
     Point::new((p.x + q.x) / 2.0, (p.y + q.y) / 2.0)
 }
 
-/// Fills computed for the current board (empty without zones).
+/// Calculate the fills for the board. The result is empty if the board has no zones.
 pub fn fills(d: &ProjectData, g: &BoardGeometry) -> Vec<ZoneFill> {
     if d.routing.zones.is_empty() {
         return Vec::new();
@@ -89,8 +89,8 @@ pub fn analyze(d: &ProjectData) -> Analysis {
     };
     let mut v: Vec<Violation> = Vec::new();
 
-    // Pour fills take part in connectivity (not in clearance: they are
-    // built with clearance).
+    // Pour fills are part of the connectivity check. They are not part of the
+    // clearance check, because each fill already keeps the clearance.
     let n_items = g.copper.len();
     for f in &fills {
         let Some(c) = f.layer.copper() else { continue };
@@ -142,8 +142,9 @@ pub fn analyze(d: &ProjectData) -> Analysis {
             by_body.insert(it.owner.body(), i);
         }
     }
-    // Pads of one part with the same number are one terminal, joined inside
-    // the part (a switch's paired legs, a connector's shield tabs).
+    // Pads of one part with the same number are one terminal. The part connects
+    // them internally (for example, the paired legs of a switch or the shield
+    // tabs of a connector).
     let mut by_pad: HashMap<(&str, &str), usize> = HashMap::new();
     for (i, it) in items.iter().enumerate() {
         if let Owner::Pad { part, pad, .. } = &it.owner {
@@ -169,14 +170,14 @@ pub fn analyze(d: &ProjectData) -> Analysis {
             }
             let both_fill = i >= n_items && j >= n_items;
             let same_net = a.net.is_some() && a.net == b.net;
-            // Pours are filled clear of other nets: a pour piece only matters
-            // for connectivity with its own net. Skipping the rest saves an
-            // exact distance to a polygon of thousands of edges per pair.
+            // A pour fill keeps clear of other nets, so a pour piece is important
+            // only for the connectivity of its own net. Skip the other pairs. This
+            // prevents an exact distance to a polygon of thousands of edges for each pair.
             if (i >= n_items || j >= n_items) && !same_net {
                 continue;
             }
-            // A pour piece against a pad or track of its net: an indexed
-            // touch test instead of an exact distance to the whole polygon.
+            // For a pour piece and a pad or track of its net, use an indexed touch
+            // test. Do not calculate the exact distance to the full polygon.
             let dist = match (i >= n_items, j >= n_items) {
                 (true, false) | (false, true) if same_net => {
                     let (f, other) = if i >= n_items { (i, b) } else { (j, a) };
@@ -187,8 +188,8 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                     }
                 }
                 (true, true) => {
-                    // Pieces of one pour are separate by construction; pieces
-                    // of two pours of the net may overlap.
+                    // Pieces of one pour are always separate. Pieces of two pours
+                    // of the same net can overlap.
                     let same_zone = matches!(
                         (&a.owner, &b.owner),
                         (Owner::Zone { id: x, .. }, Owner::Zone { id: y, .. }) if x == y
@@ -209,8 +210,8 @@ pub fn analyze(d: &ProjectData) -> Analysis {
             if same_net || both_fill {
                 continue;
             }
-            // Pieces of one part that share no net (two pads of a footprint
-            // drawn touching) are the footprint's business, not a short.
+            // If two pieces of one part have no net (for example, two pads that
+            // touch in the footprint drawing), it is a footprint problem, not a short.
             let same_part = matches!((&a.owner, &b.owner), (Owner::Pad { part: p, .. }, Owner::Pad { part: q, .. }) if p == q);
             let a_fill = i >= n_items;
             let b_fill = j >= n_items;
@@ -244,7 +245,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                     Violation::error(
                         "clearance",
                         format!(
-                            "{} to {} is {} mm, needs {} ({nets}) on {layer}",
+                            "{} and {} are {} mm apart on {layer} ({nets}), but the minimum clearance is {} mm",
                             pair[0],
                             pair[1],
                             r3(dist),
@@ -257,7 +258,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
         }
     }
 
-    // Shorts through connected copper (e.g. a track bridging two nets).
+    // Shorts through connected copper (for example, a track that connects two nets).
     let mut comp_nets: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
     for (i, it) in items.iter().enumerate() {
         if let Some(n) = &it.net {
@@ -274,7 +275,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
             let list: Vec<String> = nets.iter().cloned().collect();
             let mut viol = Violation::error(
                 "short_nets",
-                format!("nets {} are connected", list.join(", ")),
+                format!("The nets {} are connected", list.join(", ")),
             )
             .items(list.clone());
             if let Some(p) = at {
@@ -303,7 +304,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
         if islands.len() < 2 {
             continue;
         }
-        // Prim's MST over islands, nearest pad pair between islands.
+        // Prim's MST of the islands. Each edge is the nearest pad pair between two islands.
         let groups: Vec<Vec<(String, Point)>> = islands.into_values().collect();
         let k = groups.len();
         let mut in_tree = vec![false; k];
@@ -335,7 +336,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
         v.push(
             Violation::warning(
                 "unrouted",
-                format!("net {name} has {} unrouted connection(s)", k - 1),
+                format!("The net {name} has {} unrouted connection(s)", k - 1),
             )
             .items([name.clone()]),
         );
@@ -348,7 +349,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                 Violation::error(
                     "track_width",
                     format!(
-                        "{} is {} mm wide, minimum {}",
+                        "{} is {} mm wide, but the minimum width is {} mm",
                         t.id,
                         r3(t.width),
                         r3(rules.min_track_width)
@@ -360,7 +361,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
         }
         if t.points.len() < 2 {
             v.push(
-                Violation::error("track_points", format!("{} has fewer than 2 points", t.id))
+                Violation::error("track_points", format!("{} has less than 2 points", t.id))
                     .items([t.id.clone()]),
             );
         }
@@ -373,7 +374,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                 Violation::error(
                     "via_drill",
                     format!(
-                        "{} drill {} mm, minimum {}",
+                        "The drill of {} is {} mm, but the minimum is {} mm",
                         via.id,
                         r3(via.drill),
                         r3(rules.min_via_drill)
@@ -389,7 +390,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                 Violation::error(
                     "annular_ring",
                     format!(
-                        "{} ring {} mm, minimum {}",
+                        "The annular ring of {} is {} mm, but the minimum is {} mm",
                         via.id,
                         r3(ring),
                         r3(rules.min_annular_ring)
@@ -420,7 +421,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                         Violation::error(
                             "drill_size",
                             format!(
-                                "{label} drill {} mm, minimum {}",
+                                "The drill of {label} is {} mm, but the minimum is {} mm",
                                 r3(dmin),
                                 r3(rules.min_drill)
                             ),
@@ -441,7 +442,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                             Violation::error(
                                 "annular_ring",
                                 format!(
-                                    "{label} ring {} mm, minimum {}",
+                                    "The annular ring of {label} is {} mm, but the minimum is {} mm",
                                     r3(ring),
                                     r3(rules.min_annular_ring)
                                 ),
@@ -475,7 +476,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                     Violation::error(
                         "hole_to_hole",
                         format!(
-                            "holes {} and {} are {} mm apart, need {}",
+                            "The holes {} and {} are {} mm apart, but the minimum is {} mm",
                             pair[0],
                             pair[1],
                             r3(dist),
@@ -538,7 +539,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                     Violation::error(
                         "copper_to_edge",
                         format!(
-                            "{label} is {} mm from the board edge, needs {}",
+                            "{label} is {} mm from the board edge, but the minimum is {} mm",
                             r3(near),
                             r3(rules.copper_to_edge)
                         ),
@@ -587,7 +588,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                 v.push(
                     Violation::error(
                         "courtyard_overlap",
-                        format!("{} and {} courtyards overlap", pair[0], pair[1]),
+                        format!("The courtyards of {} and {} overlap", pair[0], pair[1]),
                     )
                     .at(centroid(&cys[i].2))
                     .items(pair),
@@ -601,7 +602,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                 v.push(
                     Violation::warning(
                         "courtyard_outside_board",
-                        format!("{r} courtyard extends past the board edge"),
+                        format!("The courtyard of {r} is partly outside the board"),
                     )
                     .at(centroid(c))
                     .items([r.clone()]),
@@ -629,7 +630,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
                 Owner::Hole { .. } => forbid.pads,
             };
             if forbidden && it.prim.distance(&kp) <= 1e-6 {
-                // Touching the edge is fine, overlapping is not.
+                // An item can touch the edge, but it must not overlap it.
                 let shrunk = shrink(&kp, 1e-3);
                 if it.prim.distance(&shrunk) <= 1e-6 {
                     hits.insert(it.owner.label());
@@ -645,7 +646,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
         }
         for h in hits {
             v.push(
-                Violation::error("keepout", format!("{h} is inside keep-out {kid}"))
+                Violation::error("keepout", format!("{h} is inside the keep-out {kid}"))
                     .at(centroid(pts))
                     .items([h, kid.clone()]),
             );
@@ -682,7 +683,7 @@ pub fn analyze(d: &ProjectData) -> Analysis {
     }
 }
 
-/// Checker for `Project::add_checker`.
+/// The checker for `Project::add_checker`.
 pub fn check(d: &ProjectData) -> Vec<Violation> {
     analyze(d).violations
 }
@@ -714,7 +715,7 @@ fn shrink(p: &Prim, d: f64) -> Prim {
     }
 }
 
-/// Proper overlap (touching edges do not count).
+/// Return true if the polygons overlap. Edges that only touch do not count.
 pub fn polys_overlap(a: &[Point], b: &[Point]) -> bool {
     let pa = shrink(
         &Prim::Poly {

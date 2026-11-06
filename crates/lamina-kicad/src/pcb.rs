@@ -1,4 +1,4 @@
-//! `.kicad_pcb` boards: import into project data, export from it.
+//! `.kicad_pcb` boards: import them into project data, and export them from it.
 
 use std::collections::BTreeMap;
 
@@ -12,8 +12,8 @@ use lamina_model::sexpr::{self, Node, Sx, n};
 #[derive(Debug)]
 pub struct ImportedBoard {
     pub data: ProjectData,
-    /// Footprint id to its shown KiCad 3D models, for the caller to
-    /// resolve (the first that resolves is used).
+    /// Footprint id to its visible KiCad 3D models. The caller resolves them
+    /// and uses the first model that resolves.
     pub models: BTreeMap<String, Vec<KicadModel>>,
     pub notes: Vec<String>,
 }
@@ -33,7 +33,7 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
     let root = sexpr::parse(src)?;
     if !root.is("kicad_pcb") {
         return Err(format!(
-            "not a KiCad board (starts with `{}`)",
+            "the file is not a KiCad board (it starts with `{}`)",
             root.name().unwrap_or("?")
         ));
     }
@@ -110,7 +110,7 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
         let inst: Instance = match footprint::convert(node, "", "kicad_pcb") {
             Ok(i) => i,
             Err(e) => {
-                notes.push(format!("footprint skipped: {e}"));
+                notes.push(format!("skipped a footprint: {e}"));
                 continue;
             }
         };
@@ -118,14 +118,14 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
         if !valid_refdes(&refdes) || refdes.contains("**") {
             let r = format!("X{next_x}");
             next_x += 1;
-            notes.push(format!("`{}` renamed to {r}", inst.reference));
+            notes.push(format!("renamed `{}` to {r}", inst.reference));
             refdes = r;
         }
         let count = used_refs.entry(refdes.clone()).or_default();
         *count += 1;
         if *count > 1 {
             let r = format!("{refdes}_{count}");
-            notes.push(format!("duplicate reference {refdes} renamed to {r}"));
+            notes.push(format!("renamed the duplicate reference {refdes} to {r}"));
             refdes = r;
         }
         for note in &inst.notes {
@@ -133,7 +133,7 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
                 .entry(format!("{}: {note}", inst.name))
                 .or_default() += 1;
         }
-        // Footprint definition, shared when identical.
+        // The footprint definition. Identical definitions are shared.
         let fp_id = register_footprint(&mut d, inst.footprint.clone());
         if !inst.models.is_empty() {
             models
@@ -284,7 +284,7 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
         ls.retain(|l| l.is_copper() && l.exists_in(layers));
         ls.dedup();
         if ls.is_empty() {
-            notes.push("zone on no copper layer skipped".into());
+            notes.push("skipped a zone that is on no copper layer".into());
             continue;
         }
         let Some(pts) = zone.child("polygon").and_then(|p| p.child("pts")) else {
@@ -292,7 +292,7 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
         };
         let points = points_from(pts, &bp);
         let Some(outline) = contour_from_points(points) else {
-            notes.push("zone with a degenerate outline skipped".into());
+            notes.push("skipped a zone with a degenerate outline".into());
             continue;
         };
         if let Some(k) = zone.child("keepout") {
@@ -421,7 +421,7 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
     let (loops, open) = chain_edges(edges, 0.01);
     if open > 0 {
         notes.push(format!(
-            "{open} board edge segment(s) do not close a loop and were ignored"
+            "{open} board edge segment(s) do not close a loop and are not used"
         ));
     }
     let mut loops: Vec<Contour> = loops
@@ -429,7 +429,7 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
         .filter_map(|c| match c.check() {
             Ok(()) => Some(c),
             Err(e) => {
-                notes.push(format!("board edge loop skipped: {e}"));
+                notes.push(format!("skipped a board edge loop: {e}"));
                 None
             }
         })
@@ -439,7 +439,7 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
         d.board.outline = Some(outline);
         d.board.cutouts = loops[1..].to_vec();
     } else {
-        notes.push("no closed board outline on Edge.Cuts".into());
+        notes.push("the board has no closed outline on Edge.Cuts".into());
     }
 
     for net in nets.values_mut() {
@@ -447,12 +447,13 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
         net.pads.dedup();
     }
     d.nets.nets = nets;
-    // KiCad boards sit anywhere on the sheet; put the outline's corner at the origin.
+    // A KiCad board can be anywhere on the sheet. Put the corner of the outline
+    // at the origin.
     if let Some(b) = d.board.outline.as_ref().and_then(|o| o.bbox()) {
         if b.min.x != 0.0 || b.min.y != 0.0 {
             d.translate(-b.min.x, -b.min.y);
             notes.push(format!(
-                "moved the board by ({}, {}) so its corner is at the origin",
+                "moved the board by ({}, {}) to put its corner at the origin",
                 r6(-b.min.x),
                 r6(-b.min.y)
             ));
@@ -473,8 +474,8 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
     })
 }
 
-/// Add a footprint definition, reusing an identical one and renaming a
-/// different one with the same id.
+/// Add a footprint definition. If an identical definition exists, use it.
+/// If a different definition has the same id, give the new one a new id.
 fn register_footprint(d: &mut ProjectData, mut fp: Footprint) -> String {
     let base = fp.id.clone();
     let same = |a: &Footprint, b: &Footprint| {
@@ -539,7 +540,7 @@ pub fn export_board(d: &ProjectData) -> String {
     export_board_with(d, None)
 }
 
-/// Export with 3D model paths made absolute under `model_dir`, so KiCad
+/// Export with absolute 3D model paths under `model_dir`, so that KiCad
 /// finds the files in the project cache.
 pub fn export_board_with(d: &ProjectData, model_dir: Option<&std::path::Path>) -> String {
     let copper = d.board.stackup.copper_layers;
@@ -802,7 +803,7 @@ fn polygon_node(c: &Contour) -> Node {
     n("polygon").child(pts)
 }
 
-/// Board drawing nodes (`gr_*`) for a contour, arcs kept as arcs.
+/// Board drawing nodes (`gr_*`) for a contour. Arcs stay arcs.
 fn contour_nodes(c: &Contour, layer: &str, width: f64, gi: &mut usize) -> Vec<Node> {
     let n_v = c.vertices.len();
     let mut out = Vec::new();
@@ -852,7 +853,7 @@ fn contour_nodes(c: &Contour, layer: &str, width: f64, gi: &mut usize) -> Vec<No
     out
 }
 
-/// A `gr_*` or `fp_*` node for a shape; `xf` maps to KiCad coordinates.
+/// A `gr_*` or `fp_*` node for a shape. `xf` changes points to KiCad coordinates.
 fn shape_node_with(
     shape: &Shape,
     prefix: &str,
@@ -926,7 +927,8 @@ fn footprint_node(
     model_dir: Option<&std::path::Path>,
 ) -> Node {
     let back = pl.side == Side::Bottom;
-    // Local coordinates as KiCad stores them: Y flipped on the front, as-is on the back.
+    // Local coordinates as KiCad keeps them: Y is flipped on the front and not
+    // changed on the back.
     let lk = move |p: Point| if back { (p.x, p.y) } else { (p.x, -p.y) };
     let orient = if back {
         pl.rotation + 180.0
@@ -1444,7 +1446,7 @@ mod tests {
         d
     }
 
-    /// Absolute board positions of every pad, for comparing two boards.
+    /// The absolute board positions of all pads, to compare two boards.
     fn pad_positions(d: &ProjectData) -> BTreeMap<String, (Point, f64)> {
         let mut out = BTreeMap::new();
         for (r, pl) in &d.placement.placements {
@@ -1509,7 +1511,8 @@ mod tests {
         assert_eq!(e.routing.texts[0].text, "LAMINA");
         let o = e.board.outline.as_ref().unwrap();
         assert_eq!(o.vertices.len(), 8, "rounded rectangle keeps its four arcs");
-        // Arc centres come back from three 6-decimal points, so allow a little slack.
+        // The import calculates the arc centres from three points with 6 decimals.
+        // Thus, allow a small tolerance.
         assert!((o.signed_area() - d.board.outline.as_ref().unwrap().signed_area()).abs() < 1e-4);
         assert_eq!(e.board.cutouts.len(), 1);
         // The free hole came back as a one-pad footprint.
@@ -1561,7 +1564,8 @@ mod tests {
         assert_eq!(d.routing.zones[0].layers, vec![Layer::BOTTOM]);
         let o = d.board.outline.as_ref().unwrap();
         assert!((o.signed_area() - 1200.0).abs() < 1e-6);
-        // The board was at y = 0..30 in KiCad (Y down); after the move its corner is the origin.
+        // The board was at y = 0..30 in KiCad (Y down). After the move, its corner
+        // is at the origin.
         assert_eq!(o.bbox().unwrap().min, Point::new(0.0, 0.0));
         assert_eq!(d.placement.placements["R1"].y, 20.0);
         assert_eq!(d.routing.tracks[0].points[1], Point::new(20.0, 20.0));

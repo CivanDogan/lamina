@@ -9,9 +9,9 @@ use crate::project::{OpResult, Project, Touched};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SetNets {
-    /// Net name to pads and optional class.
+    /// A map from the net name to its pads and an optional net class.
     pub nets: BTreeMap<String, Net>,
-    /// Replace the whole netlist (default) or merge into it.
+    /// If true (default), replace the full netlist. If false, merge into it.
     #[serde(default = "yes")]
     pub replace: bool,
     #[serde(default)]
@@ -36,7 +36,7 @@ pub struct Connect {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Disconnect {
     pub net: String,
-    /// Pads to remove; omit to delete the whole net.
+    /// The pads to remove. If you do not give pads, the net is deleted.
     #[serde(default)]
     pub pads: Option<Vec<PadRef>>,
     #[serde(default)]
@@ -47,12 +47,12 @@ fn check_name(n: &str) -> Result<()> {
     if valid_net_name(n) {
         Ok(())
     } else {
-        Err(Error::invalid(format!("bad net name `{n}`")))
+        Err(Error::invalid(format!("The net name `{n}` is not valid.")))
     }
 }
 
-/// Refuse pads that cannot exist: the part is known and has a footprint,
-/// but the footprint has no such pad.
+/// Refuse a pad that cannot exist. That is, the part is known and has a
+/// footprint, but the footprint does not have this pad.
 fn check_pads(d: &ProjectData, pads: &[PadRef]) -> Result<()> {
     for p in pads {
         if let Some(part) = d.parts.parts.get(&p.part) {
@@ -62,7 +62,7 @@ fn check_pads(d: &ProjectData, pads: &[PadRef]) -> Result<()> {
                     names.sort();
                     names.dedup();
                     return Err(Error::invalid(format!(
-                        "{p}: footprint `{}` has no pad `{}` (pads: {})",
+                        "{p}: the footprint `{}` has no pad `{}`. Its pads are: {}.",
                         fp.id,
                         p.pad,
                         names.join(" ")
@@ -99,7 +99,7 @@ impl Project {
         self.commit(d, Touched::file(FileKind::Nets), p.strict, "")
             .map(|mut r| {
                 r.summary = format!(
-                    "{verb} {count} net(s); netlist has {} nets",
+                    "{verb} {count} net(s). The netlist has {} nets.",
                     self.data.nets.nets.len()
                 );
                 r
@@ -109,7 +109,9 @@ impl Project {
     pub fn connect(&mut self, p: Connect) -> Result<OpResult> {
         check_name(&p.net)?;
         if p.pads.is_empty() && p.class.is_none() {
-            return Err(Error::invalid("give at least one pad or a class"));
+            return Err(Error::invalid(
+                "No pad and no net class are given. Give at least one pad or a net class.",
+            ));
         }
         let mut d = self.data.clone();
         check_pads(&d, &p.pads)?;
@@ -132,7 +134,10 @@ impl Project {
     pub fn disconnect(&mut self, p: Disconnect) -> Result<OpResult> {
         let mut d = self.data.clone();
         if !d.nets.nets.contains_key(&p.net) {
-            return Err(Error::invalid(format!("no net `{}`", p.net)));
+            return Err(Error::invalid(format!(
+                "The net `{}` does not exist.",
+                p.net
+            )));
         }
         let summary = match p.pads {
             None => {
@@ -148,7 +153,7 @@ impl Project {
                     .collect();
                 if !missing.is_empty() {
                     return Err(Error::invalid(format!(
-                        "not in net {}: {}",
+                        "These pads are not in the net {}: {}.",
                         p.net,
                         missing.join(", ")
                     )));

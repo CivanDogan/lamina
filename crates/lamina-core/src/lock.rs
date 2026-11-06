@@ -1,4 +1,4 @@
-//! `.lamina.lock` keeps two engines from writing the same project.
+//! The `.lamina.lock` file lets only one engine at a time write to a project.
 
 use std::fs;
 use std::path::{Path, PathBuf};

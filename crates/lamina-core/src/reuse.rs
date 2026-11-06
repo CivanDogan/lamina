@@ -1,11 +1,12 @@
 //! Layout reuse. A block is a set of parts, usually one group (one instance
-//! of a Jsonnet block). Its layout is the placement of its parts plus the
-//! tracks and vias that hang off its pads inside its area. That layout can
-//! be put onto another block with the same footprints wired the same way:
-//! on the same board, or from a saved file on another board.
+//! of a Jsonnet block). Its layout is the placement of its parts, and the
+//! tracks and vias that connect to its pads in its area. You can put that
+//! layout on a different block that has the same footprints with the same
+//! connections. That block can be on the same board, or on a different board
+//! (from a saved file).
 //!
-//! Parts are paired by footprint and by how their pads connect, not by
-//! name, so `J2`/`R8` can take the layout of `J3`/`R9`.
+//! Lamina pairs the parts by footprint and by the connections of their pads,
+//! not by name. Thus `J2`/`R8` can get the layout of `J3`/`R9`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -14,18 +15,19 @@ use lamina_model::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// How far outside the parts' courtyards copper still counts as the block's.
+/// The maximum distance outside the courtyards of the parts at which copper
+/// is part of the block.
 const MARGIN: f64 = 0.5;
-/// Matching gives up after this many tries.
+/// The matcher stops after this number of tries.
 const MAX_STEPS: usize = 200_000;
-/// Pads of two footprints line up when no pad is further off than this.
+/// The pads of two footprints align if no pad is farther away than this distance.
 const PAD_TOL: f64 = 0.1;
 
 fn schema_v() -> u32 {
     SCHEMA
 }
 
-/// Parts of a block: a group name, or a list of refdes.
+/// The parts of a block: a group name or a list of refdes.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Block {
@@ -50,23 +52,27 @@ impl Block {
                 let known: Vec<String> = d.parts.groups().into_keys().collect();
                 Err(if known.is_empty() {
                     format!(
-                        "no group `{g}`: the board has no groups (set `group` on parts, or use lamina.group in the source)"
+                        "There is no group `{g}`. The board has no groups. \
+                         Set `group` on the parts, or use lamina.group in the source."
                     )
                 } else {
-                    format!("no group `{g}`; groups are {}", known.join(", "))
+                    format!(
+                        "There is no group `{g}`. The groups are {}.",
+                        known.join(", ")
+                    )
                 })
             }
             Block::Parts(v) => {
                 if v.is_empty() {
-                    return Err("empty part list".into());
+                    return Err("The part list is empty.".into());
                 }
                 let mut seen = BTreeSet::new();
                 for r in v {
                     if !d.parts.parts.contains_key(r) {
-                        return Err(format!("no part {r}"));
+                        return Err(format!("The part {r} does not exist."));
                     }
                     if !seen.insert(r) {
-                        return Err(format!("{r} is listed twice"));
+                        return Err(format!("{r} is in the list two times."));
                     }
                 }
                 Ok(v.clone())
@@ -82,16 +88,16 @@ impl Block {
     }
 }
 
-/// A block layout in its own frame: the anchor part at the origin with
+/// A block layout in its own frame, with the anchor part at the origin and
 /// rotation 0. This is also the file format of saved layouts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LayoutBlock {
     #[serde(default = "schema_v")]
     pub schema: u32,
     pub name: String,
-    /// The part (by its name in this block) that sits at the origin.
+    /// The part (by its name in this block) that is at the origin.
     pub anchor: String,
-    /// Keyed by the refdes the parts had where the layout was taken.
+    /// The key is the refdes that the part had in the source of the layout.
     pub parts: BTreeMap<String, BlockPart>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracks: Vec<Track>,
@@ -103,25 +109,25 @@ pub struct LayoutBlock {
 pub struct BlockPart {
     pub footprint: String,
     pub placement: Placement,
-    /// By pad number.
+    /// The key is the pad number.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pads: BTreeMap<String, BlockPad>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BlockPad {
-    /// Pad centre in footprint coordinates. A footprint with another name
-    /// fits when its pads of the same numbers sit at the same places, after
-    /// a quarter turn and a shift if need be.
+    /// The pad centre in footprint coordinates. A footprint with a different
+    /// name fits if its pads with the same numbers are at the same positions.
+    /// For this, Lamina can turn it by quarter turns and move it.
     pub at: Point,
-    /// Net name. Only the pattern matters: two pads share a net here exactly
-    /// when they must share one where the layout goes.
+    /// The net name. Only the pattern is important: two pads are on the same
+    /// net here only if they must be on the same net in the target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net: Option<String>,
 }
 
-/// How a target footprint sits against a block part's footprint: its pad n
-/// is at R(delta) a_n + c, where a_n is the block footprint's pad n.
+/// The position of a target footprint relative to the footprint of a block
+/// part. Its pad n is at R(delta) a_n + c, where a_n is pad n of the block footprint.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Fit {
     pub delta: f64,
@@ -134,7 +140,7 @@ impl Fit {
         c: Point { x: 0.0, y: 0.0 },
     };
 
-    /// Origin offset of the footprint for a part turned `rot` on `side`.
+    /// The origin offset of the footprint, for a part with rotation `rot` on `side`.
     fn offset(self, rot: f64, side: Side) -> Point {
         Placement {
             rotation: rot,
@@ -144,8 +150,8 @@ impl Fit {
         .transform(self.c)
     }
 
-    /// Placement of the target part that puts its pads where the block
-    /// part's pads are when the block part is at `q`.
+    /// The placement of the target part that puts its pads at the positions
+    /// of the pads of the block part, when the block part is at `q`.
     fn onto_target(self, q: &Placement) -> Placement {
         let rot = match q.side {
             Side::Top => q.rotation - self.delta,
@@ -176,7 +182,8 @@ impl Fit {
     }
 }
 
-/// Pad centres by number (the mean, for numbers used by several pads).
+/// The pad centres by pad number. If more than one pad has the same number,
+/// this is their mean position.
 fn pad_centres(fp: &Footprint) -> BTreeMap<&str, Point> {
     let mut sum: BTreeMap<&str, (Point, f64)> = BTreeMap::new();
     for p in fp.pads.iter().filter(|p| !p.number.is_empty()) {
@@ -196,7 +203,7 @@ fn mean(pts: impl Iterator<Item = Point>) -> Point {
     Point::new(s.x / n, s.y / n)
 }
 
-/// Whether `fp` can stand in for the block part, and how it sits.
+/// Find if `fp` can replace the block part, and find its position.
 pub fn fit(bp: &BlockPart, fp: &Footprint) -> Option<Fit> {
     let b = pad_centres(fp);
     if !b.keys().copied().eq(bp.pads.keys().map(String::as_str)) {
@@ -212,7 +219,8 @@ pub fn fit(bp: &BlockPart, fp: &Footprint) -> Option<Fit> {
     let cb = mean(b.values().copied());
     let mut best: Option<(f64, Fit)> = None;
     for delta in [0.0, 90.0, 180.0, 270.0] {
-        // To the micrometre: library pad centres disagree by nanometres.
+        // Round to the micrometre, because the pad centres in libraries are
+        // different by some nanometres.
         let c = cb.sub(ca.rotated(delta));
         let c = Point::new((c.x * 1e3).round() / 1e3, (c.y * 1e3).round() / 1e3);
         let err = bp
@@ -298,12 +306,12 @@ impl Rigid {
 }
 
 impl LayoutBlock {
-    /// The same layout with another of its parts at the origin.
+    /// The same layout, with a different part of it at the origin.
     pub fn rebase(&self, anchor: &str) -> Result<LayoutBlock, String> {
         let a = self
             .parts
             .get(anchor)
-            .ok_or_else(|| format!("{anchor} is not in block {}", self.name))?;
+            .ok_or_else(|| format!("{anchor} is not in the block {}.", self.name))?;
         let f = Rigid::of(&a.placement).inverse();
         Ok(LayoutBlock {
             schema: self.schema,
@@ -328,8 +336,8 @@ impl LayoutBlock {
     }
 }
 
-/// Copper attached to a block: track segments as (track id, segment index)
-/// and via ids.
+/// The copper of a block: track segments as (track id, segment index), and
+/// via ids.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Attached {
     pub segments: BTreeSet<(String, usize)>,
@@ -365,7 +373,7 @@ fn hull(mut pts: Vec<Point>) -> Vec<Point> {
     lower
 }
 
-/// Inside the hull, or within `margin` of it.
+/// True if the point is in the hull, or not more than `margin` from it.
 fn near_hull(h: &[Point], p: Point, margin: f64) -> bool {
     match h.len() {
         0 => false,
@@ -421,12 +429,12 @@ fn via_layers(v: &Via, layers: u8) -> Vec<u8> {
     (a.min(b)..=a.max(b)).collect()
 }
 
-/// The block's own copper, connected to its pads:
-/// - every track and via of an internal net (all of whose pads are on the
-///   block's parts), however far it runs;
-/// - on nets that leave the block, only a fan-out to a via (a pad, a short
-///   track, a via) lying next to one of the parts. Routes heading out to
-///   the rest of the board differ for every copy and stay as they are.
+/// The copper of the block that connects to its pads:
+/// - All tracks and vias of an internal net (a net that has all of its pads
+///   on the parts of the block), at any distance.
+/// - On nets that go out of the block, only a fan-out to a via (a pad, a
+///   short track and a via) that is next to one of the parts. Routes that go
+///   to the rest of the board are different for each copy, so they do not change.
 pub fn attached(d: &ProjectData, parts: &[String]) -> Attached {
     let layers = d.board.stackup.copper_layers;
     let pad_nets = d.nets.pad_map();
@@ -441,7 +449,7 @@ pub fn attached(d: &ProjectData, parts: &[String]) -> Attached {
         .map(|(k, _)| k.as_str())
         .collect();
     let mut items: Vec<Item> = Vec::new();
-    // One area per part: its courtyard and pads.
+    // One area for each part: its courtyard and its pads.
     let mut areas: Vec<Vec<Point>> = Vec::new();
     let mut nets = BTreeSet::new();
     for r in parts {
@@ -547,7 +555,7 @@ pub fn attached(d: &ProjectData, parts: &[String]) -> Attached {
     out
 }
 
-/// Runs of consecutive chosen segments of a track, as point lists.
+/// The runs of selected segments of a track that follow each other, as point lists.
 fn runs(t: &Track, keep: impl Fn(usize) -> bool) -> Vec<Vec<Point>> {
     let mut out: Vec<Vec<Point>> = Vec::new();
     let mut cur: Vec<Point> = Vec::new();
@@ -574,7 +582,7 @@ fn area_of(fp: &Footprint) -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Take the layout of a placed block. The anchor defaults to its largest part.
+/// Get the layout of a placed block. The default anchor is its largest part.
 pub fn extract(
     d: &ProjectData,
     parts: &[String],
@@ -583,22 +591,26 @@ pub fn extract(
 ) -> Result<LayoutBlock, String> {
     let mut placed = Vec::new();
     for r in parts {
-        let part = d.parts.parts.get(r).ok_or_else(|| format!("no part {r}"))?;
+        let part = d
+            .parts
+            .parts
+            .get(r)
+            .ok_or_else(|| format!("The part {r} does not exist."))?;
         let pl = d
             .placement
             .placements
             .get(r)
-            .ok_or_else(|| format!("{r} is not placed; lay out the source block first"))?;
+            .ok_or_else(|| format!("{r} is not placed. Lay out the source block first."))?;
         let fp = d
             .footprints
             .get(&part.footprint)
-            .ok_or_else(|| format!("no footprint {}", part.footprint))?;
+            .ok_or_else(|| format!("The footprint {} does not exist.", part.footprint))?;
         placed.push((r, part, *pl, fp));
     }
     let anchor = match anchor {
         Some(a) => {
             if !parts.iter().any(|r| r == a) {
-                return Err(format!("anchor {a} is not in the block"));
+                return Err(format!("The anchor {a} is not in the block."));
             }
             a.to_string()
         }
@@ -610,7 +622,7 @@ pub fn extract(
                     .then_with(|| b.0.cmp(a.0))
             })
             .map(|p| p.0.clone())
-            .ok_or("empty block")?,
+            .ok_or("The block is empty.")?,
     };
     let f = Rigid::of(&d.placement.placements[&anchor]).inverse();
     let pad_nets = d.nets.pad_map();
@@ -668,14 +680,15 @@ pub fn extract(
     Ok(out)
 }
 
-/// How a block maps onto target parts.
+/// The pairs between a block and the target parts.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Match {
-    /// Block part name to target refdes.
+    /// A map from the block part name to the target refdes.
     pub parts: BTreeMap<String, String>,
-    /// Block net name to target net name.
+    /// A map from the block net name to the target net name.
     pub nets: BTreeMap<String, String>,
-    /// How each target footprint sits against its block part's.
+    /// The position of each target footprint relative to the footprint of
+    /// its block part.
     pub fits: BTreeMap<String, Fit>,
 }
 
@@ -685,8 +698,8 @@ type Pairs<'a> = Vec<(&'a str, &'a str)>;
 struct Matcher<'a> {
     order: Vec<&'a str>,
     cands: BTreeMap<&'a str, Vec<&'a str>>,
-    /// Per (block part, target part): the (block net, target net) pairs
-    /// their pads demand, or None when a pad has a net on one side only.
+    /// For each (block part, target part): the (block net, target net) pairs
+    /// that their pads need, or None if a pad has a net on only one side.
     demands: BTreeMap<(&'a str, &'a str), Option<Pairs<'a>>>,
     used: BTreeSet<&'a str>,
     fwd: BTreeMap<&'a str, &'a str>,
@@ -709,7 +722,9 @@ impl<'a> Matcher<'a> {
             }
             self.steps += 1;
             if self.steps > MAX_STEPS {
-                return Err("too many ways to pair the parts; give smaller blocks".into());
+                return Err(
+                    "There are too many ways to pair the parts. Give smaller blocks.".into(),
+                );
             }
             let Some(Some(dem)) = self.demands.get(&(b, t)) else {
                 continue;
@@ -749,13 +764,13 @@ impl<'a> Matcher<'a> {
     }
 }
 
-/// Pair each block part with a target part of the same footprint so that
-/// pads sharing a net in the block share one in the target, and the other
-/// way round.
+/// Pair each block part with a target part that has the same footprint.
+/// Pads that are on the same net in the block must be on the same net in
+/// the target, and the opposite.
 pub fn match_block(d: &ProjectData, b: &LayoutBlock, target: &[String]) -> Result<Match, String> {
     if target.len() != b.parts.len() {
         return Err(format!(
-            "block {} has {} parts, the target has {}",
+            "The block {} has {} parts, but the target has {}.",
             b.name,
             b.parts.len(),
             target.len()
@@ -763,7 +778,7 @@ pub fn match_block(d: &ProjectData, b: &LayoutBlock, target: &[String]) -> Resul
     }
     for r in target {
         if !d.parts.parts.contains_key(r) {
-            return Err(format!("no part {r}"));
+            return Err(format!("The part {r} does not exist."));
         }
     }
     let pad_nets = d.nets.pad_map();
@@ -806,13 +821,14 @@ pub fn match_block(d: &ProjectData, b: &LayoutBlock, target: &[String]) -> Resul
         }
         if c.is_empty() {
             return Err(format!(
-                "nothing in the target can stand in for {bk} ({}): no footprint with its pads in the same places",
+                "No part in the target can replace {bk} ({}). No footprint has its pads \
+                 at the same positions.",
                 bp.footprint
             ));
         }
         m.cands.insert(bk.as_str(), c);
     }
-    // Most constrained first: fewest candidates, then most pads.
+    // Do the most constrained parts first: the fewest candidates, then the most pads.
     m.order
         .sort_by_key(|k| (m.cands[k].len(), std::cmp::Reverse(b.parts[*k].pads.len())));
     if m.search(0)? {
@@ -840,7 +856,8 @@ pub fn match_block(d: &ProjectData, b: &LayoutBlock, target: &[String]) -> Resul
         .copied()
         .unwrap_or("?");
     Err(format!(
-        "the target is not wired like block {}: no part fits {stuck} ({}) with the same connections",
+        "The target is not wired like the block {}. No part fits {stuck} ({}) \
+         with the same connections.",
         b.name, b.parts[stuck].footprint
     ))
 }
@@ -848,25 +865,27 @@ pub fn match_block(d: &ProjectData, b: &LayoutBlock, target: &[String]) -> Resul
 /// Settings for [`apply`].
 #[derive(Debug, Clone, Default)]
 pub struct ApplyOpts {
-    /// Where the target's anchor part goes; default: where it is now.
+    /// The position of the anchor part of the target. The default is its
+    /// position now.
     pub at: Option<Placement>,
-    /// Copy tracks and vias (and remove the target's old ones).
+    /// Copy the tracks and vias, and remove the old tracks and vias of the target.
     pub routing: bool,
-    /// Move locked parts too.
+    /// Also move locked parts.
     pub force: bool,
-    /// Copper that must stay even if it touches the target (the source's).
+    /// Copper that must not change, also if it touches the target (the
+    /// copper of the source).
     pub keep: Attached,
 }
 
 /// What [`apply`] did.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, JsonSchema)]
 pub struct Applied {
-    /// Target refdes that stayed in place (or went to `at`).
+    /// The target refdes that did not move (or that moved to `at`).
     pub anchor: String,
     pub parts: usize,
     pub tracks: usize,
     pub vias: usize,
-    /// Old track segments and vias of the target that were removed.
+    /// The number of old track segments and vias of the target that were removed.
     pub removed: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
@@ -892,9 +911,9 @@ fn fresh(ids: &mut Vec<String>, prefix: &str) -> String {
     id
 }
 
-/// Put a block's layout onto the target parts. The target part paired with
-/// the block's anchor stays where it is (or goes to `at`); the others are
-/// placed around it as in the block.
+/// Put the layout of a block on the target parts. The target part that is
+/// paired with the anchor of the block does not move (or it moves to `at`).
+/// The other parts are placed around it as in the block.
 pub fn apply(
     d: &mut ProjectData,
     b: &LayoutBlock,
@@ -904,21 +923,23 @@ pub fn apply(
     let m = match_block(d, b, target)?;
     let anchor = m.parts[&b.anchor].clone();
     let ba = &b.parts[&b.anchor].placement;
-    let at =
-        match o.at {
-            Some(p) => p,
-            None => *d.placement.placements.get(&anchor).ok_or_else(|| {
-                format!("place {anchor} first (it anchors the block), or give `at`")
-            })?,
-        };
+    let at = match o.at {
+        Some(p) => p,
+        None => *d.placement.placements.get(&anchor).ok_or_else(|| {
+            format!(
+                "{anchor} is not placed. It is the anchor of the block. \
+                     Place it first, or give `at`."
+            )
+        })?,
+    };
     if at.side != ba.side {
         return Err(format!(
-            "{anchor} is on the {} but the block has it on the {}; flip it first",
+            "{anchor} is on the {} side, but the block has it on the {} side. Flip it first.",
             at.side.as_str(),
             ba.side.as_str()
         ));
     }
-    // Where the block's own anchor footprint would sit, then the frame map.
+    // Find the position of the anchor footprint of the block, then the frame map.
     let at_block = m.fits[&b.anchor].onto_block(&at);
     let f = Rigid::of(ba).inverse().then(Rigid::of(&at_block));
     let mut out = Applied {
@@ -936,14 +957,14 @@ pub fn apply(
             let moved =
                 (old.x, old.y, old.rotation, old.side) != (pl.x, pl.y, pl.rotation, pl.side);
             if old.locked && moved && !o.force {
-                return Err(format!("{t} is locked; pass force: true"));
+                return Err(format!("{t} is locked. Set force: true to move it."));
             }
         }
         moves.push((t.clone(), pl));
     }
 
     if o.routing {
-        // Old copper of the target, found before its parts move.
+        // Find the old copper of the target before its parts move.
         let old = attached(d, target);
         let mut ids = all_ids(d);
         let mut tracks = Vec::new();
@@ -993,8 +1014,10 @@ pub fn apply(
                 continue;
             };
             if !usable(t.layer) {
-                out.notes
-                    .push(format!("skipped a track on {}: not on this board", t.layer));
+                out.notes.push(format!(
+                    "A track on {} was not copied, because this board does not have that layer.",
+                    t.layer
+                ));
                 continue;
             }
             let mut nt = f.track(t);
@@ -1016,7 +1039,7 @@ pub fn apply(
         }
         if !skipped.is_empty() {
             out.notes.push(format!(
-                "copper on {} was not copied: no pad of the block is on that net",
+                "The copper on {} was not copied, because no pad of the block is on that net.",
                 skipped.into_iter().collect::<Vec<_>>().join(", ")
             ));
         }
@@ -1029,7 +1052,7 @@ pub fn apply(
     Ok(out)
 }
 
-/// Groups other than `group` that can take its layout.
+/// The groups, other than `group`, that can get its layout.
 pub fn matching_groups(d: &ProjectData, group: &str) -> Vec<String> {
     let groups = d.parts.groups();
     let Some(src) = groups.get(group) else {
@@ -1045,9 +1068,9 @@ pub fn matching_groups(d: &ProjectData, group: &str) -> Vec<String> {
         .collect()
 }
 
-/// Copy the layout of block `from` onto each target. `anchor` is a part
-/// that stays put: in `from` (its counterpart stays in every target) or in
-/// one of the targets.
+/// Copy the layout of the block `from` to each target. `anchor` is a part
+/// that does not move. It can be in `from` (then the part that matches it in
+/// each target does not move) or in one of the targets.
 pub fn repeat(
     d: &mut ProjectData,
     from: &[String],
@@ -1056,16 +1079,16 @@ pub fn repeat(
     o: &ApplyOpts,
 ) -> Result<Vec<Applied>, String> {
     if to.is_empty() {
-        return Err("no target block given".into());
+        return Err("No target block is given. Give at least one block in `to`.".into());
     }
     if o.at.is_some() && to.len() > 1 {
-        return Err("`at` needs exactly one target".into());
+        return Err("If you give `at`, you must give exactly one target.".into());
     }
     let mut seen: BTreeSet<&str> = from.iter().map(String::as_str).collect();
     for t in to {
         for r in t {
             if !seen.insert(r.as_str()) {
-                return Err(format!("{r} is in more than one block"));
+                return Err(format!("{r} is in more than one block."));
             }
         }
     }
@@ -1077,14 +1100,14 @@ pub fn repeat(
             let t = to
                 .iter()
                 .find(|t| t.iter().any(|r| r == a))
-                .ok_or_else(|| format!("anchor {a} is not in any of the blocks"))?;
+                .ok_or_else(|| format!("The anchor {a} is not in any of the blocks."))?;
             let m = match_block(d, &b, t)?;
             let local = m
                 .parts
                 .iter()
                 .find(|(_, r)| r.as_str() == a)
                 .map(|(k, _)| k.clone())
-                .ok_or("anchor not paired")?;
+                .ok_or("No part in the layout matches the anchor.")?;
             b = b.rebase(&local)?;
         }
     }
@@ -1146,8 +1169,8 @@ mod tests {
     }
 
     /// Two LED blocks: Dn (2 pads) + Rn (2 pads), wired IN -> R -> A -> D -> GND.
-    /// Block 1 is laid out and routed; block 2 is somewhere else, unrouted,
-    /// and its parts are listed the other way round.
+    /// Block 1 is laid out and routed. Block 2 is at a different position and
+    /// is not routed. Its parts are in the opposite order.
     fn board() -> ProjectData {
         let mut d = ProjectData::new("t");
         d.footprints
@@ -1164,7 +1187,7 @@ mod tests {
             p.group = Some(g.into());
             d.parts.parts.insert(r.into(), p);
         }
-        // IN and GND leave the blocks (U9 is a controller elsewhere).
+        // IN and GND go out of the blocks (U9 is a controller at a different position).
         net(&mut d, "IN1", &["R1.1", "U9.1"]);
         net(&mut d, "A1", &["R1.2", "D1.1"]);
         net(&mut d, "IN2", &["R2.1", "U9.2"]);
@@ -1186,20 +1209,21 @@ mod tests {
         d.placement
             .placements
             .insert("R2".into(), pl(40.0, 40.0, 0.0));
-        // R1.2 is at (10, 7.5); D1.1 at (9.2, 10).
+        // R1.2 is at (10, 7.5). D1.1 is at (9.2, 10).
         track(&mut d, "t1", "A1", &[(10.0, 7.5), (9.2, 8.3), (9.2, 10.0)]);
-        // Leaves the block towards the controller: not the block's.
+        // This track goes out of the block to the controller, so it is not
+        // part of the block.
         track(
             &mut d,
             "t2",
             "IN1",
             &[(10.0, 6.5), (10.0, 6.0), (0.0, -20.0)],
         );
-        // Old routing of block 2, to be replaced.
+        // The old routing of block 2. The test replaces it.
         track(&mut d, "t3", "A2", &[(40.5, 40.0), (30.0, 19.2)]);
-        // GND passing next to D1 without touching its pads.
+        // A GND track that goes near D1, but does not touch its pads.
         track(&mut d, "t4", "GND", &[(8.5, 10.6), (11.5, 10.6)]);
-        // D1's GND fan-out to a via: the block's.
+        // The GND fan-out of D1 to a via. It is part of the block.
         track(&mut d, "t6", "GND", &[(10.8, 10.0), (11.4, 9.4)]);
         d.routing.vias.push(Via {
             id: "v1".into(),
@@ -1263,7 +1287,7 @@ mod tests {
     #[test]
     fn refuses_other_wiring() {
         let mut d = board();
-        // D2 reversed: its pad 1 now goes to GND.
+        // D2 is reversed: its pad 1 now connects to GND.
         net(&mut d, "A2", &["R2.2", "D2.2"]);
         net(&mut d, "GND", &["D1.2", "D2.1"]);
         let b = extract(&d, &["D1".into(), "R1".into()], None, "a").unwrap();
@@ -1291,8 +1315,8 @@ mod tests {
         assert_eq!(r[0].anchor, "D2");
         assert_eq!(r[0].removed, 1);
         assert_eq!((r[0].tracks, r[0].vias), (2, 1));
-        // D2 stays at (30, 20) rotated 90: R2 sits like R1 does to D1,
-        // turned a quarter: R1 is 3 below D1, so R2 is 3 to the right of D2.
+        // D2 stays at (30, 20) with rotation 90. R2 is relative to D2 as R1 is
+        // to D1, but turned a quarter. R1 is 3 below D1, so R2 is 3 to the right of D2.
         let pl = d.placement.placements["D2"];
         assert_eq!((pl.x, pl.y, pl.rotation), (30.0, 20.0, 90.0));
         let pl = d.placement.placements["R2"];
@@ -1301,21 +1325,21 @@ mod tests {
             "{pl:?}"
         );
         assert_eq!(pl.rotation, 180.0);
-        // The old A2 track is gone and the copy connects the new pads.
+        // The old A2 track is removed, and the copy connects the new pads.
         assert!(!d.routing.tracks.iter().any(|t| t.id == "t3"));
         let a2: Vec<&Track> = d.routing.tracks.iter().filter(|t| t.net == "A2").collect();
         assert_eq!(a2.len(), 1);
         assert_eq!(a2[0].points[0], Point::new(32.5, 20.0));
         assert_eq!(*a2[0].points.last().unwrap(), Point::new(30.0, 19.2));
-        // The GND fan-out came along with its via; the IN route and the
-        // passing GND track did not.
+        // The GND fan-out was copied with its via. The IN route and the GND
+        // track that goes near D1 were not copied.
         assert!(!d.routing.tracks.iter().any(|t| t.net == "IN2"));
         assert_eq!(
             d.routing.tracks.iter().filter(|t| t.net == "GND").count(),
             3
         );
         assert_eq!(d.routing.vias.len(), 2);
-        // Source untouched.
+        // The source did not change.
         assert_eq!(d.placement.placements["R1"].x, 10.0);
         assert!(d.routing.tracks.iter().any(|t| t.id == "t1"));
     }
@@ -1325,7 +1349,7 @@ mod tests {
         let mut d = board();
         d.placement.placements.get_mut("D2").unwrap().locked = true;
         let o = ApplyOpts::default();
-        // R2 anchors: D2 has to move, and it is locked.
+        // R2 is the anchor. D2 must move, but it is locked.
         let e = repeat(
             &mut d,
             &["D1".into(), "R1".into()],
@@ -1344,8 +1368,8 @@ mod tests {
             &o,
         )
         .unwrap();
-        // In R1's frame D1 is 3 along its x axis, turned 270. R2 is not
-        // rotated, so D2 lands 3 to the right of it, at 270.
+        // In the frame of R1, D1 is 3 along the x axis, turned 270. R2 has no
+        // rotation, so D2 goes 3 to the right of R2, at 270.
         let r2 = d.placement.placements["R2"];
         assert_eq!((r2.x, r2.y, r2.rotation), (40.0, 40.0, 0.0));
         let d2 = d.placement.placements["D2"];
@@ -1381,18 +1405,18 @@ mod tests {
         let d = board();
         let b = extract(&d, &["D1".into(), "R1".into()], None, "a").unwrap();
         let bp = &b.parts["D1"];
-        // Origin on pad 1 instead of the centre.
+        // The origin is on pad 1, not at the centre.
         let f = fit(bp, &fp("X", &[("1", 0.0), ("2", 1.6)])).unwrap();
         assert_eq!(f.delta, 0.0);
         assert!((f.c.x - 0.8).abs() < 1e-9 && f.c.y.abs() < 1e-9);
-        // Numbered the other way round: a half turn.
+        // The pads have the opposite numbers: a half turn.
         assert_eq!(
             fit(bp, &fp("X", &[("2", -0.85), ("1", 0.85)]))
                 .unwrap()
                 .delta,
             180.0
         );
-        // Wider pad spacing, or other pad numbers: no fit.
+        // A wider pad spacing, or different pad numbers: no fit.
         assert!(fit(bp, &fp("X", &[("1", -1.0), ("2", 1.0)])).is_none());
         assert!(fit(bp, &fp("X", &[("A", -0.8), ("K", 0.8)])).is_none());
     }
@@ -1400,7 +1424,7 @@ mod tests {
     #[test]
     fn other_footprint_is_turned_so_its_pads_land_right() {
         let mut d = board();
-        // D2 is the same LED from another library, pads numbered the other way.
+        // D2 is the same LED from a different library, with the opposite pad numbers.
         d.footprints
             .insert("LEDB".into(), fp("LEDB", &[("2", -0.85), ("1", 0.85)]));
         d.parts.parts.get_mut("D2").unwrap().footprint = "LEDB".into();
@@ -1416,7 +1440,7 @@ mod tests {
             &o,
         )
         .unwrap();
-        // With LED it would be (43, 40) at 270; LEDB needs a half turn more.
+        // With LED, D2 is at (43, 40) at 270. LEDB needs one more half turn.
         let d2 = d.placement.placements["D2"];
         assert!(
             (d2.x - 43.0).abs() < 1e-9 && (d2.y - 40.0).abs() < 1e-9,

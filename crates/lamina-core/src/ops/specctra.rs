@@ -1,4 +1,4 @@
-//! Specctra DSN out and SES in, for external autorouters (Freerouting).
+//! Export to Specctra DSN and import from SES, for external autorouters (Freerouting).
 
 use std::path::{Path, PathBuf};
 
@@ -11,11 +11,11 @@ use crate::project::{OpResult, Project, Touched, next_id};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ExportSpecctra {
-    /// Output file (default `output/<board name>.dsn` in the project).
+    /// The output file. The default is `output/<board name>.dsn` in the project.
     #[serde(default)]
     pub path: Option<String>,
-    /// Leave existing tracks and vias out so the router starts from scratch
-    /// (default: they are exported as protected wiring).
+    /// If true, do not export the tracks and vias that are on the board, so the
+    /// router starts with no wiring. The default (false) exports them as protected wiring.
     #[serde(default)]
     pub reroute_all: bool,
 }
@@ -25,16 +25,16 @@ pub struct SpecctraExported {
     pub path: String,
     pub nets: usize,
     pub parts: usize,
-    /// How to route it with Freerouting.
+    /// How to route the DSN file with Freerouting.
     pub hint: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ImportSpecctraSession {
-    /// Path of the `.ses` file the router wrote.
+    /// The path of the `.ses` file that the router wrote.
     pub path: String,
-    /// Replace the existing tracks and vias of the routed nets (default
-    /// true); otherwise the session's routes are added to them.
+    /// If true (default), replace the tracks and vias of the routed nets.
+    /// If false, add the routes of the session to them.
     #[serde(default = "yes")]
     pub replace: bool,
     #[serde(default)]
@@ -56,7 +56,7 @@ impl Project {
         };
         if self.data.board.outline.is_none() {
             return Err(Error::invalid(
-                "set the board outline before exporting a DSN",
+                "The board outline is not set. Set the outline before you export a DSN file.",
             ));
         }
         let text = lamina_specctra::export_dsn(&self.data, &self.data.board.name, p.reroute_all);
@@ -65,8 +65,8 @@ impl Project {
             path: path.display().to_string(),
             nets: self.data.nets.nets.len(),
             parts: self.data.placement.placements.len(),
-            hint: "route it with Freerouting (java -jar freerouting.jar -de <file.dsn> -do <file.ses>), \
-                   then import_specctra_session with the .ses"
+            hint: "Route the file with Freerouting (java -jar freerouting.jar -de <file.dsn> \
+                   -do <file.ses>). Then use import_specctra_session with the .ses file."
                 .into(),
         })
     }
@@ -94,7 +94,7 @@ impl Project {
         let min_w = d.board.rules.min_track_width;
         let mut widened = 0;
         for mut t in session.tracks {
-            // Routers hand back widths a rounding step under the minimum.
+            // Routers can return widths that are one rounding step less than the minimum.
             if t.width < min_w && t.width >= min_w * 0.9 {
                 t.width = min_w;
                 widened += 1;
@@ -120,7 +120,8 @@ impl Project {
         res.notes = session.notes;
         if widened > 0 {
             res.notes.push(format!(
-                "{widened} track(s) came back just under the minimum width and were widened to {min_w} mm"
+                "{widened} track(s) came back a little narrower than the minimum width. \
+                 They are now {min_w} mm wide."
             ));
         }
         Ok(res)

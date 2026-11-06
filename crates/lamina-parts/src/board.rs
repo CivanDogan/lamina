@@ -1,9 +1,9 @@
-//! EasyEDA (standard edition) PCB documents, as exported with
-//! "File → Export → EasyEDA", into project data.
+//! Imports EasyEDA (standard edition) PCB documents into project data. To get
+//! such a document, use "File → Export → EasyEDA" in EasyEDA.
 //!
-//! Units are 10 mil with Y down; footprint children carry absolute
-//! coordinates, which are brought back to footprint-local through the
-//! placement.
+//! Units are 10 mil and Y points down. Footprint children have absolute
+//! coordinates. The placement changes them back to footprint-local
+//! coordinates.
 
 use std::collections::BTreeMap;
 
@@ -19,7 +19,7 @@ use crate::easyeda::{
 #[derive(Debug)]
 pub struct ImportedBoard {
     pub data: ProjectData,
-    /// Footprint id to its EasyEDA 3D model, for the caller to fetch.
+    /// Maps a footprint id to its EasyEDA 3D model. The caller downloads the models.
     pub models: BTreeMap<String, ModelInfo>,
     pub notes: Vec<String>,
 }
@@ -28,7 +28,7 @@ fn r6(v: f64) -> f64 {
     json::round6(v)
 }
 
-/// Board layer for an EasyEDA layer id, if we keep it.
+/// The board layer for an EasyEDA layer id, if Lamina keeps that layer.
 fn board_layer(id: &str, copper: u8) -> Option<Layer> {
     Some(match id {
         "1" => Layer::TOP,
@@ -69,9 +69,9 @@ fn attrs(text: &str) -> BTreeMap<String, String> {
 }
 
 pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
-    let head = doc.get("head").ok_or("document has no head")?;
+    let head = doc.get("head").ok_or("the document has no head")?;
     if head.get("docType").and_then(Value::as_str) != Some("3") {
-        return Err("not an EasyEDA PCB document (docType is not 3)".into());
+        return Err("this is not an EasyEDA PCB document (docType is not 3)".into());
     }
     let num = |v: Option<&Value>| -> f64 {
         match v {
@@ -87,7 +87,7 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
     let shapes: Vec<&str> = doc
         .get("shape")
         .and_then(Value::as_array)
-        .ok_or("document has no shape list")?
+        .ok_or("the document has no shape list")?
         .iter()
         .filter_map(Value::as_str)
         .collect();
@@ -96,7 +96,7 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
     let mut notes = Vec::new();
     let mut models = BTreeMap::new();
 
-    // Copper layer count from the inner layers in use.
+    // Get the number of copper layers from the inner layers that are in use.
     let mut max_inner = 0u8;
     for sh in &shapes {
         let fields: Vec<&str> = sh.split('~').collect();
@@ -136,7 +136,7 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
             d.board.rules.min_track_width = v.min(d.board.rules.min_track_width);
         }
     }
-    // EasyEDA's own defaults for what its rule set does not say.
+    // Use the EasyEDA defaults for the values that its rule set does not give.
     d.board.rules.hole_to_hole = d.board.rules.hole_to_hole.min(0.254);
     d.board.rules.preset = None;
 
@@ -167,13 +167,13 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
                         let mut refdes = inst.refdes.clone();
                         if !valid_refdes(&refdes) {
                             refdes = format!("X{}", ids.next("x"));
-                            notes.push(format!("`{}` renamed to {refdes}", inst.refdes));
+                            notes.push(format!("renamed `{}` to {refdes}", inst.refdes));
                         }
                         let count = used_refs.entry(refdes.clone()).or_default();
                         *count += 1;
                         if *count > 1 {
                             let r = format!("{refdes}_{count}");
-                            notes.push(format!("duplicate reference {refdes} renamed to {r}"));
+                            notes.push(format!("renamed the duplicate reference {refdes} to {r}"));
                             refdes = r;
                         }
                         for n in inst.notes {
@@ -214,7 +214,7 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
                             }
                         }
                     }
-                    Err(e) => notes.push(format!("footprint skipped: {e}")),
+                    Err(e) => notes.push(format!("skipped a footprint: {e}")),
                 }
             }
             "TRACK" => {
@@ -394,7 +394,7 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
                 });
             }
             "PAD" => {
-                // A pad outside any footprint: wrap it in a one-pad footprint.
+                // This pad is not in a footprint. Put it in a footprint with one pad.
                 match pad_any(&ctx, &fields) {
                     Ok(raw) => {
                         let n = ids.next("p");
@@ -442,7 +442,7 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
                                 .push(PadRef::new(refdes, number));
                         }
                     }
-                    Err(e) => notes.push(format!("free pad skipped: {e}")),
+                    Err(e) => notes.push(format!("skipped a free pad: {e}")),
                 }
             }
             "COPPERAREA" => {
@@ -456,7 +456,7 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
                 let pts = path_points(&ctx, s(&fields, 4));
                 let Some(outline) = contour_from_points(pts) else {
                     *skipped
-                        .entry("copper areas with a degenerate outline".into())
+                        .entry("copper areas with an outline that is not valid".into())
                         .or_default() += 1;
                     continue;
                 };
@@ -518,7 +518,7 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
                     {
                         if l.is_copper() {
                             *skipped
-                                .entry("solid copper regions kept as drawings only".into())
+                                .entry("solid copper regions (kept only as drawings)".into())
                                 .or_default() += 1;
                         }
                         d.routing.graphics.push(BoardGraphic {
@@ -548,7 +548,7 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
                     continue;
                 }
                 let size = r6((f(&fields, 9) * U).max(0.3));
-                // EasyEDA anchors text at its left baseline; ours is centred.
+                // EasyEDA anchors text at its left baseline. Lamina centres text.
                 let w = 0.6 * size * text.chars().count() as f64;
                 let base = ctx.pt(f(&fields, 2), f(&fields, 3));
                 let rot = r6((-f(&fields, 5)).rem_euclid(360.0));
@@ -567,15 +567,15 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
         }
     }
 
-    // Outline strokes are 0.254 mm wide in EasyEDA; ends within that look
-    // joined. Boards drawn with real gaps still get an outline, closed with
-    // straight lines, rather than none.
+    // In EasyEDA, outline strokes are 0.254 mm wide, so ends nearer than
+    // this look joined. If a board has real gaps, close them with straight
+    // lines. Then the board still gets an outline.
     let (mut loops, mut open) = chain_edges(edges.clone(), 0.15);
     if loops.is_empty() && !edges.is_empty() {
         let (l2, o2) = chain_edges(edges, 3.0);
         if !l2.is_empty() {
             notes.push(
-                "the board outline had gaps; they were closed with straight lines (up to 3 mm)"
+                "the board outline had gaps. Lamina closed them with straight lines (up to 3 mm)"
                     .into(),
             );
             loops = l2;
@@ -584,7 +584,7 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
     }
     if open > 0 {
         notes.push(format!(
-            "{open} board outline segment(s) do not close a loop and were ignored"
+            "{open} board outline segment(s) do not close a loop and are not used"
         ));
     }
     let mut loops: Vec<Contour> = loops.into_iter().filter(|c| c.check().is_ok()).collect();
@@ -593,18 +593,19 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
         d.board.outline = Some(outline);
         d.board.cutouts.extend(loops[1..].iter().cloned());
     } else {
-        notes.push("no closed board outline".into());
+        notes.push("the board has no closed outline".into());
     }
     for (what, n) in skipped {
-        notes.push(format!("{n} {what} skipped"));
+        notes.push(format!("skipped {n} {what}"));
     }
     for net in nets.values_mut() {
         net.pads.sort();
         net.pads.dedup();
     }
     d.nets.nets = nets;
-    // Rules the board does not state are taken from what it contains, so an
-    // import starts clean; `use_fab_preset` applies a fab's limits later.
+    // If the board does not give a rule, use the value that the board contains.
+    // Then an import starts with no violations. Later, `use_fab_preset`
+    // applies the limits of a fab.
     let r = &mut d.board.rules;
     let floor6 = |v: f64| (v * 1e6).floor() / 1e6;
     for v in &d.routing.vias {
@@ -633,7 +634,9 @@ pub fn import_board(doc: &Value, name: &str) -> Result<ImportedBoard, String> {
     r.hole_to_hole = r.hole_to_hole.min(0.1);
     r.copper_to_edge = r.copper_to_edge.min(0.1);
     notes.push(
-        "rules relaxed to what the board contains; run use_fab_preset for a fab's limits".into(),
+        "the rules were made less strict to agree with the board. To use the limits of a fab, \
+         run use_fab_preset"
+            .into(),
     );
     if let Some(b) = d.board.outline.as_ref().and_then(|o| o.bbox()) {
         if b.min.x != 0.0 || b.min.y != 0.0 {
@@ -678,8 +681,9 @@ struct LibInstance {
     notes: Vec<String>,
 }
 
-/// A placed footprint: children are absolute, so first find the side and
-/// placement, then map every child back to footprint-local coordinates.
+/// A placed footprint. The children have absolute coordinates, so find the
+/// side and the placement first. Then map each child back to footprint-local
+/// coordinates.
 fn lib_instance(
     ctx: &Ctx,
     head: &[&str],
@@ -820,7 +824,7 @@ fn lib_instance(
                     pad.at = local(pad.at);
                     pad.rotation = local_angle(pad.rotation);
                     if let PadShape::Polygon { points } = &mut pad.shape {
-                        // Points are relative to the pad centre; only mirror and rotate them.
+                        // The points are relative to the pad centre. Only mirror and rotate them.
                         let rel = Placement {
                             x: 0.0,
                             y: 0.0,
@@ -838,7 +842,7 @@ fn lib_instance(
                     }
                     fp.pads.push(pad);
                 }
-                Err(e) => notes.push(format!("pad skipped: {e}")),
+                Err(e) => notes.push(format!("skipped a pad: {e}")),
             },
             "HOLE" => {
                 let dia = r6(f(c, 3) * 2.0 * U);
@@ -968,9 +972,9 @@ fn lib_instance(
         }
     }
     for (what, n) in skipped {
-        notes.push(format!("{n} {what} skipped"));
+        notes.push(format!("skipped {n} {what}"));
     }
-    // Reference and value placeholders where EasyEDA shows them.
+    // Add the reference and value placeholders where EasyEDA shows them.
     if let Some(cy) = fp.pads_bbox() {
         fp.texts.push(FpText {
             layer: FpLayer::Silk,
@@ -986,8 +990,8 @@ fn lib_instance(
             size: 0.6,
             rotation: 0.0,
         });
-        // EasyEDA has no courtyards; the pad extent keeps parts selectable
-        // without inventing overlaps on dense boards.
+        // EasyEDA has no courtyards. The pad extent lets you select parts, and
+        // it does not add false overlaps on dense boards.
         let m = 0.0;
         fp.graphics.push(FpGraphic {
             layer: FpLayer::Courtyard,
@@ -1000,7 +1004,7 @@ fn lib_instance(
         });
     }
     if let Some(m) = &model {
-        // The model's outline centre moves with the footprint; keep it local.
+        // The outline centre of the model moves with the footprint. Keep it local.
         let _ = m;
     }
     Ok(LibInstance {
@@ -1016,7 +1020,7 @@ fn lib_instance(
     })
 }
 
-/// Footprint layer for an EasyEDA layer id on a footprint of `side`.
+/// The footprint layer for an EasyEDA layer id on a footprint of `side`.
 fn fp_layer(id: &str, side: Side) -> Option<FpLayer> {
     match id {
         "3" if side == Side::Top => Some(FpLayer::Silk),
@@ -1058,18 +1062,18 @@ mod tests {
     use super::*;
 
     fn doc() -> Value {
-        // Origin (4000, 3000); 10 mil units, Y down. A 20 x 10 mm board.
+        // The origin is (4000, 3000). Units are 10 mil, Y points down. A 20 x 10 mm board.
         let shapes = vec![
             "TRACK~1~10~~4000 3000 4078.74 3000 4078.74 3039.37 4000 3039.37 4000 3000~gge1~0".to_string(),
-            // R1 at (5, 5) mm, rotated 90 counter-clockwise: pad 1 (left in the
-            // library) ends up below the centre, which is +y in EasyEDA's Y-down frame.
+            // R1 is at (5, 5) mm, rotated 90 counter-clockwise. Pad 1 (left in the
+            // library) moves below the centre. This is +y in the Y-down frame of EasyEDA.
             "LIB~4019.685~3019.685~package`R0603`BOM_Supplier Part`C21190`BOM_Manufacturer`UNI-ROYAL`BOM_Manufacturer Part`0603WAF1001T5E~90~~gge10~1#@$\
 PAD~RECT~4019.685~3022.933~3.5433~3.1496~1~GND~1~0~~90~gge11~0~~Y~0~0#@$\
 PAD~RECT~4019.685~3016.437~3.5433~3.1496~1~SIG~2~0~~90~gge12~0~~Y~0~0#@$\
 TRACK~0.5~3~~4017 3013 4017 3026~gge13~0#@$\
 TEXT~P~4015~3010~0.6~0~0~3~~4.5~R1~~~gge14~~0#@$\
 TEXT~N~4015~3030~0.6~0~0~3~~4.5~1k~~~gge15~~0".to_string(),
-            // Q1 on the bottom at (15, 5) mm.
+            // Q1 is on the bottom at (15, 5) mm.
             "LIB~4059.055~3019.685~package`SOT-23~0~~gge20~1#@$\
 PAD~RECT~4055.3~3016~2.4~3.6~2~SIG~1~0~~0~gge21~0~~Y~0~0#@$\
 PAD~RECT~4062.8~3016~2.4~3.6~2~GND~2~0~~0~gge22~0~~Y~0~0#@$\
@@ -1110,7 +1114,8 @@ TEXT~P~4055~3010~0.6~0~1~4~~4.5~Q1~~~gge24~~0".to_string(),
         );
         assert_eq!((r1.rotation, r1.side), (90.0, Side::Top));
         let fp = &d.footprints[&d.parts.parts["R1"].footprint];
-        // Local pads lie on the X axis once the 90° is undone: pad 1 at (-0.825, 0).
+        // Without the 90° rotation, the local pads are on the X axis.
+        // Pad 1 is at (-0.825, 0).
         let p1 = fp.pad("1").unwrap();
         assert!(
             (p1.at.x + 0.825).abs() < 1e-3 && p1.at.y.abs() < 1e-3,
@@ -1121,13 +1126,13 @@ TEXT~P~4055~3010~0.6~0~1~4~~4.5~Q1~~~gge24~~0".to_string(),
         let q1 = d.placement.placements["Q1"];
         assert_eq!(q1.side, Side::Bottom);
         let qfp = &d.footprints[&d.parts.parts["Q1"].footprint];
-        // Pad 3 (abs (15, 4.06)) is below the centre; pad 1 is to the left on the board.
+        // Pad 3 (abs (15, 4.06)) is below the centre. Pad 1 is on the left on the board.
         let p3 = qfp.pad("3").unwrap();
         assert!(p3.at.x.abs() < 1e-3 && p3.at.y < 0.0, "{:?}", p3.at);
         let p1 = qfp.pad("1").unwrap();
         assert!(
             q1.transform(p1.at).x < 15.0,
-            "pad 1 stays left after mirroring back"
+            "pad 1 must stay on the left after the mirror back"
         );
         assert_eq!(d.nets.nets["SIG"].pads.len(), 2);
         assert_eq!(d.nets.nets["GND"].pads.len(), 2);

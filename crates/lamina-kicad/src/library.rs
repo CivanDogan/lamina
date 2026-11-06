@@ -1,5 +1,5 @@
-//! Where KiCad footprints and 3D models come from: local `*.pretty` and
-//! `*.3dshapes` folders, or the official libraries online.
+//! The sources of KiCad footprints and 3D models: local `*.pretty` and
+//! `*.3dshapes` folders, or the official online libraries.
 
 use std::path::{Path, PathBuf};
 
@@ -44,7 +44,7 @@ fn standard_dirs(kind: &str) -> Vec<PathBuf> {
     out
 }
 
-/// Footprint library roots from the environment and standard installs.
+/// Footprint library roots from the environment and the standard installations.
 pub fn env_footprint_dirs() -> Vec<PathBuf> {
     let mut v = env_dirs("FOOTPRINT_DIR", "KISYSMOD");
     v.extend(standard_dirs("footprints"));
@@ -52,7 +52,7 @@ pub fn env_footprint_dirs() -> Vec<PathBuf> {
     v
 }
 
-/// 3D model library roots from the environment and standard installs.
+/// 3D model library roots from the environment and the standard installations.
 pub fn env_model_dirs() -> Vec<PathBuf> {
     let mut v = env_dirs("3DMODEL_DIR", "KISYS3DMOD");
     v.extend(standard_dirs("3dmodels"));
@@ -60,7 +60,7 @@ pub fn env_model_dirs() -> Vec<PathBuf> {
     v
 }
 
-/// Every `*.pretty` library under the roots (a root may itself be one).
+/// All `*.pretty` libraries under the roots. A root can also be a library.
 pub fn pretty_libs(roots: &[PathBuf]) -> Vec<(String, PathBuf)> {
     let mut out = Vec::new();
     let nick = |p: &Path| {
@@ -121,7 +121,7 @@ pub fn search(roots: &[PathBuf], query: &str, limit: usize) -> Vec<Hit> {
     out
 }
 
-/// A footprint by `Lib:Name`, or by name alone across all libraries.
+/// A footprint by `Lib:Name`, or by name only, in all libraries.
 pub fn find(roots: &[PathBuf], spec: &str) -> Option<Hit> {
     let (lib, name) = match spec.split_once(':') {
         Some((l, n)) => (Some(l), n),
@@ -156,8 +156,8 @@ pub fn model_relative(kicad_path: &str) -> String {
 pub fn model_lib_name(kicad_path: &str) -> Option<(String, String)> {
     let rel = model_relative(kicad_path);
     let (dir, file) = rel.rsplit_once('/')?;
-    // Only the last folder counts: the pair names a file in the model cache,
-    // so `..` or a whole path must not get into it.
+    // Use only the last folder. The pair is the name of a file in the model
+    // cache, so `..` or a full path must not get into it.
     let last = dir.rsplit('/').next()?;
     let lib = last.strip_suffix(".3dshapes").unwrap_or(last).to_string();
     let name = file
@@ -169,7 +169,7 @@ pub fn model_lib_name(kicad_path: &str) -> Option<(String, String)> {
     (plain(&lib) && plain(&name)).then_some((lib, name))
 }
 
-/// A local file for a model path, preferring STEP over VRML.
+/// A local file for a model path. STEP has priority over VRML.
 pub fn resolve_model(roots: &[PathBuf], kicad_path: &str) -> Option<PathBuf> {
     let rel = model_relative(kicad_path);
     let stem = rel
@@ -189,13 +189,13 @@ pub fn resolve_model(roots: &[PathBuf], kicad_path: &str) -> Option<PathBuf> {
             }
         }
     }
-    // Only an absolute path stands on its own; a relative one would depend
-    // on the current directory.
+    // Use the path directly only if it is absolute. A relative path changes
+    // with the current directory.
     let direct = PathBuf::from(&rel);
     (direct.is_absolute() && direct.is_file()).then_some(direct)
 }
 
-/// Where footprints and models can be fetched from when they are not local.
+/// A source to download footprints and models from, when they are not local.
 pub trait KicadSource: Send + Sync {
     fn footprint(&self, library: &str, name: &str) -> Result<String, String>;
     /// STEP bytes of a model.
@@ -237,7 +237,7 @@ impl KicadSource for HttpSource {
     }
 }
 
-/// Folders laid out like the libraries, for tests and offline mirrors.
+/// Folders with the same layout as the libraries, for tests and offline mirrors.
 #[derive(Debug, Clone)]
 pub struct DirSource {
     pub footprints: PathBuf,
@@ -283,7 +283,7 @@ mod tests {
         assert!(find(&roots, "Package_TO_SOT_SMD:SOT-23").is_some());
         assert!(find(&roots, "SOT-23").is_some());
         assert!(find(&roots, "Resistor_SMD:SOT-23").is_none());
-        // A .pretty folder given directly works too.
+        // A .pretty folder that is given directly also works.
         let direct = vec![fixtures().join("LED_SMD.pretty")];
         assert_eq!(search(&direct, "led", 5).len(), 1);
     }
@@ -299,7 +299,7 @@ mod tests {
             model_lib_name(p),
             Some(("Resistor_SMD".into(), "R_0603_1608Metric".into()))
         );
-        // A path out of the project folder names only its last folder.
+        // For a path outside the project folder, the name uses only its last folder.
         assert_eq!(
             model_lib_name("${KIPRJMOD}/../../models/socket/DS1009.step"),
             Some(("socket".into(), "DS1009".into()))

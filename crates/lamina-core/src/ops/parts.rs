@@ -10,16 +10,16 @@ use crate::project::{OpResult, Project, Touched};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct FootprintFromPackage {
-    /// Package name, e.g. `R_0603`, `SOIC-8`, `TSSOP-28`, `SOT-223`,
+    /// The package name, for example `R_0603`, `SOIC-8`, `TSSOP-28`, `SOT-223`,
     /// `QFN-32_5x5_P0.5_EP3.3x3.3`, `LQFP-48_7x7_P0.5`, `PinHeader_1x03_P2.54`.
     pub package: String,
     /// IPC density level A (most), B (nominal, default) or C (least).
     #[serde(default)]
     pub density: Option<Density>,
-    /// Footprint id; defaults to the package name.
+    /// The footprint id. The default is the package name.
     #[serde(default)]
     pub id: Option<String>,
-    /// Replace an existing footprint with the same id.
+    /// Replace a footprint that has the same id.
     #[serde(default)]
     pub overwrite: bool,
 }
@@ -37,18 +37,19 @@ pub struct FootprintFromPads {
     pub description: Option<String>,
     /// Pads in footprint coordinates (top view, origin at the part centre).
     pub pads: Vec<Pad>,
-    /// Body outline size for courtyard, silk and fab drawing.
+    /// The size of the body outline, for the courtyard, silkscreen and fab drawings.
     #[serde(default)]
     pub body: Option<BodySize>,
     /// Body height in mm.
     #[serde(default)]
     pub height: Option<f64>,
-    /// Extra graphics; when they include a courtyard none is generated.
+    /// More graphics. If they include a courtyard, Lamina does not generate a courtyard.
     #[serde(default)]
     pub graphics: Vec<FpGraphic>,
     #[serde(default)]
     pub keepouts: Vec<FpKeepout>,
-    /// Where the numbers came from, e.g. `{"source": "datasheet", "document": "PCA9685 rev 4", "page": 48}`.
+    /// The source of the numbers, for example
+    /// `{"source": "datasheet", "document": "PCA9685 rev 4", "page": 48}`.
     pub provenance: Provenance,
     #[serde(default)]
     pub overwrite: bool,
@@ -61,9 +62,9 @@ pub struct FootprintId {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AddPart {
-    /// Reference designator, e.g. `R1`, `U2`.
+    /// The reference designator, for example `R1` or `U2`.
     pub refdes: String,
-    /// Footprint id in the project.
+    /// The footprint id in the project.
     pub footprint: String,
     #[serde(default)]
     pub value: Option<String>,
@@ -71,7 +72,7 @@ pub struct AddPart {
     pub mpn: Option<String>,
     #[serde(default)]
     pub manufacturer: Option<String>,
-    /// LCSC part number, e.g. `C25804`.
+    /// The LCSC part number, for example `C25804`.
     #[serde(default)]
     pub lcsc: Option<String>,
     #[serde(default)]
@@ -80,10 +81,10 @@ pub struct AddPart {
     pub dnp: bool,
     #[serde(default)]
     pub fields: BTreeMap<String, String>,
-    /// Block instance the part belongs to (see `repeat_layout`).
+    /// The block instance that the part is in (see `repeat_layout`).
     #[serde(default)]
     pub group: Option<String>,
-    /// Replace an existing part with the same refdes.
+    /// Replace a part that has the same refdes.
     #[serde(default)]
     pub replace: bool,
     #[serde(default)]
@@ -100,7 +101,7 @@ pub struct AddParts {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct RemovePart {
     pub refdes: String,
-    /// Also remove its pads from nets (default true).
+    /// Also remove the pads of the part from the nets (default true).
     #[serde(default = "yes")]
     pub remove_from_nets: bool,
     #[serde(default)]
@@ -130,13 +131,13 @@ impl Project {
     ) -> Result<OpResult> {
         if !valid_id(&fp.id) {
             return Err(Error::invalid(format!(
-                "footprint id `{}` must use letters, digits, . _ -",
+                "The footprint id `{}` is not valid. Use only letters, digits, `.`, `_` and `-`.",
                 fp.id
             )));
         }
         if self.data.footprints.contains_key(&fp.id) && !overwrite {
             return Err(Error::invalid(format!(
-                "footprint `{}` exists; pass overwrite: true to replace it",
+                "The footprint `{}` already exists. Set overwrite: true to replace it.",
                 fp.id
             )));
         }
@@ -191,7 +192,7 @@ impl Project {
             .footprints
             .get(id)
             .cloned()
-            .ok_or_else(|| Error::invalid(format!("no footprint `{id}`")))
+            .ok_or_else(|| Error::invalid(format!("The footprint `{id}` does not exist.")))
     }
 
     pub fn list_footprints(&self) -> Vec<FootprintSummary> {
@@ -227,19 +228,21 @@ impl Project {
     fn insert_part(d: &mut ProjectData, p: AddPart) -> Result<String> {
         if !valid_refdes(&p.refdes) {
             return Err(Error::invalid(format!(
-                "bad refdes `{}`: start with a letter, then letters, digits, _ or -",
+                "The refdes `{}` is not valid. Start with a letter, then use only letters, \
+                 digits, `_` and `-`.",
                 p.refdes
             )));
         }
         if !d.footprints.contains_key(&p.footprint) {
             return Err(Error::invalid(format!(
-                "no footprint `{}`; create it first (footprint_from_package, footprint_from_pads or import_lcsc)",
+                "The footprint `{}` does not exist. Create it first with \
+                 footprint_from_package, footprint_from_pads or import_lcsc.",
                 p.footprint
             )));
         }
         if d.parts.parts.contains_key(&p.refdes) && !p.replace {
             return Err(Error::invalid(format!(
-                "{} exists; pass replace: true to change it",
+                "{} already exists. Set replace: true to change it.",
                 p.refdes
             )));
         }
@@ -287,7 +290,10 @@ impl Project {
     pub fn remove_part(&mut self, p: RemovePart) -> Result<OpResult> {
         let mut d = self.data.clone();
         if d.parts.parts.remove(&p.refdes).is_none() {
-            return Err(Error::invalid(format!("no part {}", p.refdes)));
+            return Err(Error::invalid(format!(
+                "The part {} does not exist.",
+                p.refdes
+            )));
         }
         let mut t = Touched::file(FileKind::Parts);
         if d.placement.placements.remove(&p.refdes).is_some() {
@@ -305,12 +311,12 @@ impl Project {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SetModel {
-    /// Footprint to change.
+    /// The footprint to change.
     pub footprint: String,
-    /// Model file (STEP or OBJ). An absolute path is copied into
-    /// `cache/models/user/`; a relative path is taken inside `cache/models/`.
+    /// The model file (STEP or OBJ). Lamina copies a file with an absolute path
+    /// into `cache/models/user/`. A relative path is relative to `cache/models/`.
     pub file: String,
-    /// Offset in mm, applied after rotation.
+    /// The offset in mm. Lamina applies it after the rotation.
     #[serde(default)]
     pub offset: [f64; 3],
     /// Rotation in degrees about X, then Y, then Z.
@@ -321,14 +327,17 @@ pub struct SetModel {
 impl Project {
     pub fn set_model(&mut self, p: SetModel) -> Result<OpResult> {
         if !self.data.footprints.contains_key(&p.footprint) {
-            return Err(Error::invalid(format!("no footprint `{}`", p.footprint)));
+            return Err(Error::invalid(format!(
+                "The footprint `{}` does not exist.",
+                p.footprint
+            )));
         }
         let src = std::path::Path::new(&p.file);
         let rel = if src.is_absolute() {
             let name = src
                 .file_name()
                 .and_then(|n| n.to_str())
-                .ok_or_else(|| Error::invalid("model path has no file name"))?;
+                .ok_or_else(|| Error::invalid("The model path has no file name."))?;
             let rel = format!("user/{name}");
             let dst = self.root().join(MODEL_DIR).join(&rel);
             if src != dst {
@@ -339,14 +348,14 @@ impl Project {
         } else {
             if p.file.contains("..") {
                 return Err(Error::invalid(
-                    "relative model paths stay inside cache/models",
+                    "A relative model path must stay in cache/models. Do not use `..` in it.",
                 ));
             }
             p.file.replace('\\', "/")
         };
         let path = self.root().join(MODEL_DIR).join(&rel);
         let mesh = lamina_step::load(&path)
-            .map_err(|e| Error::invalid(format!("model does not load: {e}")))?;
+            .map_err(|e| Error::invalid(format!("Lamina cannot load the model: {e}")))?;
         let (lo, hi) = mesh.bounds().unwrap_or(([0.0; 3], [0.0; 3]));
         let mut d = self.data.clone();
         let fp = d.footprints.get_mut(&p.footprint).unwrap();
@@ -364,8 +373,15 @@ impl Project {
             format!("footprint `{id}` now uses model {rel}"),
         )?;
         r.notes.push(format!(
-            "model bounds before offset: min ({:.3}, {:.3}, {:.3}) max ({:.3}, {:.3}, {:.3}), {} triangles",
-            lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], mesh.triangles()
+            "Model bounds before the offset: min ({:.3}, {:.3}, {:.3}), \
+             max ({:.3}, {:.3}, {:.3}), {} triangles.",
+            lo[0],
+            lo[1],
+            lo[2],
+            hi[0],
+            hi[1],
+            hi[2],
+            mesh.triangles()
         ));
         Ok(r)
     }

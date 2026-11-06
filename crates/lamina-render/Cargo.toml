@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "2D and 3D rendering for Lamina"
+description = "2D and 3D renderer for Lamina"
 
 [dependencies]
 lamina-model.workspace = true

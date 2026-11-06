@@ -15,19 +15,27 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const INSTRUCTIONS: &str = "\
-Lamina is a PCB layout engine. The board lives in a project folder of JSON files \
-(board, parts, nets, placement, routing, notes, cache/footprints). A viewer may be \
-watching those files and redraws on every change.
+Lamina is a PCB layout engine. The board is in a project folder of JSON files \
+(board, parts, nets, placement, routing, notes, cache/footprints). A viewer can watch \
+these files and draws the board again after each change.
 
 Conventions: millimetres, Y up, rotation in degrees counter-clockwise, fixed origin \
-(changing the outline moves nothing else). Layers: copper `top`, `in1`.., `bottom`; \
-others `top.silk`, `top.mask`, `top.paste`, `top.courtyard`, `top.fab`, `bottom.*`, \
-`outline`. Pads are referenced as `REFDES.PAD`, e.g. `U1.3`.
+(a change to the outline does not move other items). Copper layers: `top`, `in1`.., \
+`bottom`. Other layers: `top.silk`, `top.mask`, `top.paste`, `top.courtyard`, `top.fab`, \
+`bottom.*`, `outline`. Refer to a pad as `REFDES.PAD`, for example `U1.3`.
 
-A board may be modular: `design.jsonnet` (Jsonnet = JSON plus variables, functions and `import`) generates board.json, parts.json and nets.json. Those files are then read-only for the tools; edit the source as text and it is rebuilt before the next tool call. Shared blocks live in the workspace `lib` folders (see `lamina.json`) and `import 'lamina.libsonnet'` gives `merge`, `group`, `net`, `pads`, `rect`, `hole` and `corner_holes`. Placement and routing stay plain JSON and are edited with the tools as usual. Wrap each block instance in `lamina.group('name', ...)`: lay out one instance, then `repeat_layout` copies it to the others.
+A board can be modular: `design.jsonnet` (Jsonnet = JSON plus variables, functions and \
+`import`) generates board.json, parts.json and nets.json. The tools then cannot change \
+these files. Edit the source as text. Lamina builds it again before the next tool call. \
+Placement and routing stay plain JSON. Edit them with the tools as usual.
 
-Every change is applied and its new rule violations are reported. Pass `strict: true` \
-to refuse a change that would add an error instead. Malformed input is always refused. \
+Shared blocks are in the workspace `lib` folders (see `lamina.json`). \
+`import 'lamina.libsonnet'` gives `merge`, `group`, `net`, `pads`, `rect`, `hole` and \
+`corner_holes`. Put each block instance in `lamina.group('name', ...)`. Lay out one \
+instance, then use `repeat_layout` to copy its layout to the other instances.
+
+Lamina applies each change and reports the new rule violations. To refuse a change \
+that adds an error, set `strict: true`. Lamina always refuses malformed input. \
 Start with `open` (create: true for a new project), then `status`.";
 
 pub type Shared = Arc<Mutex<Option<Project>>>;
@@ -42,10 +50,10 @@ pub struct Lamina {
 pub struct OpenParams {
     /// Project folder.
     pub path: String,
-    /// Create the project if the folder has none.
+    /// If the folder has no project, create one.
     #[serde(default)]
     pub create: bool,
-    /// Board name for a new project (defaults to the folder name).
+    /// The board name for a new project (the default is the folder name).
     #[serde(default)]
     pub name: Option<String>,
     /// With `create`: start the board from a modular `design.jsonnet`
@@ -62,13 +70,13 @@ pub struct SchemaParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CheckParams {
-    /// Only report these rule ids.
+    /// Report only these rule ids.
     #[serde(default)]
     pub rules: Option<Vec<String>>,
     /// Include warnings (default true).
     #[serde(default = "yes")]
     pub warnings: bool,
-    /// Maximum number of violations returned (default 200).
+    /// The maximum number of violations to return (default 200).
     #[serde(default)]
     pub limit: Option<usize>,
 }
@@ -104,12 +112,12 @@ impl Lamina {
         let mut guard = self.project.lock().unwrap_or_else(|p| p.into_inner());
         let Some(p) = guard.as_mut() else {
             return Ok(error_result(
-                "no project is open; call `open` with a folder path first",
+                "No project is open. Call `open` with a folder path first.",
             ));
         };
-        // Pick up edits made in the viewer or by hand since the last call.
+        // Read the edits that were made in the viewer or by hand after the last call.
         if let Err(e) = p.sync() {
-            return Ok(error_result(format!("could not re-read the project: {e}")));
+            return Ok(error_result(format!("Cannot read the project again: {e}")));
         }
         Ok(match f(p) {
             Ok(v) => json_result(&v),
@@ -118,8 +126,8 @@ impl Lamina {
     }
 }
 
-/// Open a project to read it, without the lock, so it works while an agent
-/// or another tool has it open.
+/// Open a project to read it, without the lock. This also works when an
+/// agent or another tool has the project open.
 pub fn read_project(path: &str) -> lamina_core::Result<Project> {
     let dir = PathBuf::from(path);
     if !model::ProjectData::is_project(&dir) {
@@ -169,7 +177,7 @@ impl Lamina {
         Parameters(p): Parameters<OpenParams>,
     ) -> Result<CallToolResult, McpError> {
         let mut guard = self.project.lock().unwrap_or_else(|p| p.into_inner());
-        // Release the previous project's lock first.
+        // First, release the lock of the previous project.
         *guard = None;
         match open_project(&p.path, p.create, p.name, p.modular) {
             Ok(proj) => {
@@ -181,17 +189,18 @@ impl Lamina {
         }
     }
 
-    /// Summary of the open project: size, layers, counts, unplaced parts,
-    /// and violation counts per rule.
+    /// A summary of the open project: size, layers, counts, unplaced parts,
+    /// and the number of violations for each rule.
     #[tool(annotations(title = "Project status", read_only_hint = true))]
     async fn status(&self) -> Result<CallToolResult, McpError> {
         self.with(|p| Ok(p.status()))
     }
 
-    /// Search KiCad footprint libraries on this machine: `kicad_footprints`
-    /// folders in lamina.json, KICAD*_FOOTPRINT_DIR, standard installs.
-    /// `import_kicad_footprint` with `Library:Name` also works with no local
-    /// library, fetching from the official KiCad libraries online.
+    /// Search the KiCad footprint libraries on this computer: the
+    /// `kicad_footprints` folders in lamina.json, KICAD*_FOOTPRINT_DIR and
+    /// standard installs. `import_kicad_footprint` with `Library:Name` also
+    /// works without a local library. It then downloads from the official
+    /// KiCad libraries.
     #[tool(annotations(title = "Search KiCad footprints", read_only_hint = true))]
     async fn search_kicad_footprints(
         &self,
@@ -202,8 +211,8 @@ impl Lamina {
 
     /// Import a KiCad footprint and its STEP model from a local library, a
     /// `.kicad_mod` file, or the official KiCad libraries online
-    /// (`Library:Name`, e.g. `Package_TO_SOT_SMD:SOT-23`), optionally adding
-    /// a part with `refdes`.
+    /// (`Library:Name`, for example `Package_TO_SOT_SMD:SOT-23`). With
+    /// `refdes`, also add a part.
     #[tool(annotations(title = "Import KiCad footprint"))]
     async fn import_kicad_footprint(
         &self,
@@ -214,7 +223,7 @@ impl Lamina {
 
     /// Import a `.kicad_pcb` board into the open project: outline, parts
     /// with footprints, nets, placement, tracks, vias, zones, keep-outs and
-    /// texts. The project must be empty unless `replace` is true.
+    /// texts. The project must be empty, or `replace` must be true.
     #[tool(annotations(title = "Import KiCad board"))]
     async fn import_kicad_board(
         &self,
@@ -223,11 +232,11 @@ impl Lamina {
         self.with(|proj| proj.import_kicad_board(p))
     }
 
-    /// Import an EasyEDA (standard editor) PCB JSON, as saved with
+    /// Import an EasyEDA (standard editor) PCB JSON file that was saved with
     /// File > Export > EasyEDA: outline, parts with footprints and LCSC
     /// numbers, nets, placement, tracks, vias, copper areas, holes and
-    /// texts. 3D models are fetched from EasyEDA. The project must be empty
-    /// unless `replace` is true.
+    /// texts. The tool downloads the 3D models from EasyEDA. The project must
+    /// be empty, or `replace` must be true.
     #[tool(annotations(title = "Import EasyEDA board"))]
     async fn import_easyeda_board(
         &self,
@@ -236,9 +245,10 @@ impl Lamina {
         self.with(|proj| proj.import_easyeda_board(p))
     }
 
-    /// Write a Specctra DSN of the board for an external autorouter such as
-    /// Freerouting (default `output/<name>.dsn`). Existing routes go out as
-    /// protected wiring unless `reroute_all`.
+    /// Write a Specctra DSN of the board for an external autorouter, for
+    /// example Freerouting (default `output/<name>.dsn`). The existing routes
+    /// are exported as protected wiring. If `reroute_all` is true, they are
+    /// not exported.
     #[tool(annotations(title = "Export Specctra DSN"))]
     async fn export_specctra(
         &self,
@@ -247,8 +257,8 @@ impl Lamina {
         self.with(|proj| proj.export_specctra(p))
     }
 
-    /// Read the `.ses` session a Specctra router wrote and put its tracks
-    /// and vias on the board, replacing the routes of those nets.
+    /// Read the `.ses` session that a Specctra router wrote, and put its
+    /// tracks and vias on the board. They replace the routes of those nets.
     #[tool(annotations(title = "Import Specctra session"))]
     async fn import_specctra_session(
         &self,
@@ -259,9 +269,9 @@ impl Lamina {
 
     /// Import Gerber and drill files (a folder or a zip) from any CAD
     /// program as artwork: board outline, holes, copper and silkscreen as
-    /// drawings. There are no parts or nets in fab files, so the result is
-    /// for viewing, rendering and checking. The project must be empty
-    /// unless `replace` is true.
+    /// drawings. Fab files have no parts or nets, so use the result only to
+    /// look at, render and check the board. The project must be empty, or
+    /// `replace` must be true.
     #[tool(annotations(title = "Import Gerbers"))]
     async fn import_gerbers(
         &self,
@@ -271,9 +281,10 @@ impl Lamina {
     }
 
     /// Write the assembled board as a STEP file (AP214) for mechanical CAD:
-    /// the board solid with its outline, cut-outs and drilled holes, and
-    /// every part's 3D model placed. Part STEP files are included whole, so
-    /// geometry and colours are exact. Default `output/<name>.step`.
+    /// the board solid with its outline, cut-outs and drilled holes, and the
+    /// 3D model of each part at its placement. The file includes the full part
+    /// STEP files, so the geometry and the colours are exact. The default is
+    /// `output/<name>.step`.
     #[tool(annotations(title = "Export STEP"))]
     async fn export_step(
         &self,
@@ -282,8 +293,9 @@ impl Lamina {
         self.with(|proj| proj.export_step(p))
     }
 
-    /// Write the board as a `.kicad_pcb` file that KiCad 8 or newer opens
-    /// (default `output/<name>.kicad_pcb`). Zones are refilled by KiCad.
+    /// Write the board as a `.kicad_pcb` file that KiCad 8 or a newer version
+    /// can open (default `output/<name>.kicad_pcb`). KiCad fills the zones
+    /// again.
     #[tool(annotations(title = "Export KiCad board"))]
     async fn export_kicad(
         &self,
@@ -292,16 +304,16 @@ impl Lamina {
         self.with(|proj| proj.export_kicad(p))
     }
 
-    /// Build `design.jsonnet` into board.json, parts.json and nets.json and
-    /// reload. Every tool also rebuilds automatically when the source or an
-    /// imported file changed, so call this to force a build or to see the
+    /// Build `design.jsonnet` into board.json, parts.json and nets.json, then
+    /// reload. Each tool also builds again automatically if the source or an
+    /// imported file changed. Use this tool to force a build or to see the
     /// report (added and removed parts, warnings).
     #[tool(annotations(title = "Build design source"))]
     async fn build(&self) -> Result<CallToolResult, McpError> {
         self.with(|p| p.build())
     }
 
-    /// Re-read all files from disk, for example after editing JSON by hand.
+    /// Read all files from disk again, for example after you edit the JSON by hand.
     #[tool(annotations(title = "Reload from disk"))]
     async fn reload(&self) -> Result<CallToolResult, McpError> {
         self.with(|p| {
@@ -310,7 +322,7 @@ impl Lamina {
         })
     }
 
-    /// JSON schema of a project file kind.
+    /// The JSON schema of a project file kind.
     #[tool(annotations(title = "File schema", read_only_hint = true))]
     async fn schema(
         &self,
@@ -319,14 +331,14 @@ impl Lamina {
         Ok(match model::schema_for(&p.kind) {
             Some(s) => json_result(&s),
             None => error_result(format!(
-                "unknown kind `{}`; use one of {}",
+                "Unknown kind `{}`. Use one of these: {}",
                 p.kind,
                 model::SCHEMA_KINDS.join(", ")
             )),
         })
     }
 
-    /// List current rule violations (validation and DRC).
+    /// List the rule violations that the project has now (validation and DRC).
     #[tool(annotations(title = "Check", read_only_hint = true))]
     async fn check(
         &self,
@@ -347,8 +359,9 @@ impl Lamina {
         })
     }
 
-    /// Set the board outline: a rectangle (optionally rounded) or a contour
-    /// of lines and arcs. Cut-outs replace existing ones when given.
+    /// Set the board outline: a rectangle (with optional round corners) or a
+    /// contour of lines and arcs. If you give cut-outs, they replace the
+    /// existing cut-outs.
     #[tool(annotations(title = "Set outline"))]
     async fn set_outline(
         &self,
@@ -357,8 +370,8 @@ impl Lamina {
         self.with(|proj| proj.set_outline(p))
     }
 
-    /// Change copper layer count, thickness, copper weight, finish or colours.
-    /// Only the fields given change.
+    /// Change the number of copper layers, the thickness, the copper weight,
+    /// the finish or the colours. Only the fields that you give change.
     #[tool(annotations(title = "Set stackup"))]
     async fn set_stackup(
         &self,
@@ -367,7 +380,7 @@ impl Lamina {
         self.with(|proj| proj.set_stackup(p))
     }
 
-    /// Change design rules. Only the given fields change, for example
+    /// Change the design rules. Only the fields that you give change, for example
     /// `{"rules": {"clearance": 0.2, "net_classes": {"power": {"track_width": 0.5}}}}`.
     #[tool(annotations(title = "Set rules"))]
     async fn set_rules(
@@ -378,7 +391,8 @@ impl Lamina {
     }
 
     /// Set the netlist: `{"nets": {"GND": {"pads": ["U1.1", "C1.2"]}}}`.
-    /// Replaces the whole netlist unless `replace` is false.
+    /// This replaces the whole netlist. If `replace` is false, the nets merge
+    /// into the netlist.
     #[tool(annotations(title = "Set nets"))]
     async fn set_nets(
         &self,
@@ -387,7 +401,8 @@ impl Lamina {
         self.with(|proj| proj.set_nets(p))
     }
 
-    /// Add pads to a net (created if missing), optionally setting its class.
+    /// Add pads to a net. If the net does not exist, create it. You can also
+    /// set its class.
     #[tool(annotations(title = "Connect"))]
     async fn connect(
         &self,
@@ -396,7 +411,7 @@ impl Lamina {
         self.with(|proj| proj.connect(p))
     }
 
-    /// Remove pads from a net, or the whole net when `pads` is omitted.
+    /// Remove pads from a net. If you do not give `pads`, remove the whole net.
     #[tool(annotations(title = "Disconnect"))]
     async fn disconnect(
         &self,
@@ -417,8 +432,9 @@ impl Lamina {
         self.with(|proj| proj.footprint_from_package(p))
     }
 
-    /// Create a footprint from pads typed in from a datasheet land pattern.
-    /// Courtyard, fab outline and silkscreen are added when no courtyard is given.
+    /// Create a footprint from pads that you type from the land pattern in a
+    /// datasheet. If you give no courtyard, the tool adds a courtyard, a fab
+    /// outline and silkscreen.
     #[tool(annotations(title = "Footprint from pads"))]
     async fn footprint_from_pads(
         &self,
@@ -427,7 +443,7 @@ impl Lamina {
         self.with(|proj| proj.footprint_from_pads(p))
     }
 
-    /// Full footprint JSON: pads, graphics, model, provenance.
+    /// The full JSON of a footprint: pads, graphics, model, provenance.
     #[tool(annotations(title = "Get footprint", read_only_hint = true))]
     async fn get_footprint(
         &self,
@@ -436,7 +452,8 @@ impl Lamina {
         self.with(|proj| proj.get_footprint(&p.id))
     }
 
-    /// Footprints in the project with pad count, source and users.
+    /// The footprints in the project, with the number of pads, the source and
+    /// the parts that use each footprint.
     #[tool(annotations(title = "List footprints", read_only_hint = true))]
     async fn list_footprints(&self) -> Result<CallToolResult, McpError> {
         self.with(|proj| Ok(proj.list_footprints()))
@@ -451,7 +468,7 @@ impl Lamina {
         self.with(|proj| proj.add_part(p))
     }
 
-    /// Add several parts at once.
+    /// Add many parts in one call.
     #[tool(annotations(title = "Add parts"))]
     async fn add_parts(
         &self,
@@ -460,7 +477,8 @@ impl Lamina {
         self.with(|proj| proj.add_parts(p))
     }
 
-    /// Remove a part, its placement and (by default) its pads from nets.
+    /// Remove a part and its placement. By default, also remove its pads from
+    /// the nets.
     #[tool(annotations(title = "Remove part"))]
     async fn remove_part(
         &self,
@@ -468,8 +486,9 @@ impl Lamina {
     ) -> Result<CallToolResult, McpError> {
         self.with(|proj| proj.remove_part(p))
     }
-    /// Search LCSC / JLCPCB parts by keyword, MPN or LCSC number. Results show
-    /// package, stock, price and whether it is a JLCPCB basic part.
+    /// Search LCSC / JLCPCB parts by keyword, MPN or LCSC number. The results
+    /// show the package, the stock, the price and if the part is a JLCPCB
+    /// basic part.
     #[tool(annotations(title = "Search parts", read_only_hint = true, open_world_hint = true))]
     async fn search_part(
         &self,
@@ -478,8 +497,9 @@ impl Lamina {
         self.with(|proj| proj.search_part(p))
     }
 
-    /// Import an LCSC part: converts its EasyEDA footprint, downloads the 3D
-    /// model, caches everything in the project, and optionally adds a part.
+    /// Import an LCSC part. The tool converts its EasyEDA footprint, downloads
+    /// the 3D model and caches all of it in the project. It can also add a
+    /// part.
     #[tool(annotations(title = "Import LCSC part", open_world_hint = true))]
     async fn import_lcsc(
         &self,
@@ -505,7 +525,8 @@ impl Lamina {
         self.with(|proj| proj.use_fab_preset(p))
     }
 
-    /// Place a part at x, y (mm) with optional rotation (degrees CCW) and side.
+    /// Place a part at x, y (mm) with an optional rotation (degrees CCW) and
+    /// side.
     #[tool(annotations(title = "Place part"))]
     async fn place(&self, Parameters(p): Parameters<Place>) -> Result<CallToolResult, McpError> {
         self.with(|proj| proj.place(p))
@@ -529,7 +550,8 @@ impl Lamina {
         self.with(|proj| proj.move_parts(p))
     }
 
-    /// Rotate a part to an absolute angle (`rotation`) or by a relative one (`by`).
+    /// Rotate a part to an absolute angle (`rotation`) or by a relative angle
+    /// (`by`).
     #[tool(annotations(title = "Rotate part"))]
     async fn rotate_part(
         &self,
@@ -553,7 +575,7 @@ impl Lamina {
         self.with(|proj| proj.align(p))
     }
 
-    /// Space parts evenly along X or Y.
+    /// Put parts at equal distances along X or Y.
     #[tool(annotations(title = "Distribute parts"))]
     async fn distribute(
         &self,
@@ -562,12 +584,13 @@ impl Lamina {
         self.with(|proj| proj.distribute(p))
     }
 
-    /// Copy the layout of one block onto others: placement of every part,
-    /// plus the tracks and vias hanging off the block's pads inside its
-    /// area (the target's old ones there are replaced). Blocks are group
-    /// names (`lamina.group` in the source, or `group` on parts) or refdes
-    /// lists. Parts are paired by footprint and wiring, not by name. The
-    /// anchor part stays put and the rest is arranged around it.
+    /// Copy the layout of one block to other blocks: the placement of each
+    /// part, and the tracks and vias that connect to the pads of the block in
+    /// its area. These replace the old tracks and vias of the target in that
+    /// area. A block is a group name (`lamina.group` in the source, or `group`
+    /// on parts) or a refdes list. The tool pairs parts by footprint and
+    /// wiring, not by name. The anchor part does not move, and the tool puts
+    /// the other parts around it.
     #[tool(annotations(title = "Repeat layout"))]
     async fn repeat_layout(
         &self,
@@ -576,9 +599,9 @@ impl Lamina {
         self.with(|proj| proj.repeat_layout(p))
     }
 
-    /// Save a laid-out block (placement and its routing) as
-    /// `layouts/<name>.json` in the first workspace library, or in the board
-    /// when it has no workspace, so other boards can place it.
+    /// Save the layout of a block (placement and routing) as
+    /// `layouts/<name>.json` in the first workspace library. If the board has
+    /// no workspace, save it in the board. Other boards can then place it.
     #[tool(annotations(title = "Save layout block"))]
     async fn save_layout_block(
         &self,
@@ -587,8 +610,9 @@ impl Lamina {
         self.with(|proj| proj.save_layout_block(p))
     }
 
-    /// Put a saved layout onto blocks of this board, like `repeat_layout`
-    /// but from `layouts/<name>.json` (the board's own, then the libraries').
+    /// Put a saved layout on blocks of this board. This is like
+    /// `repeat_layout`, but the layout comes from `layouts/<name>.json` (first
+    /// in the board, then in the libraries).
     #[tool(annotations(title = "Place layout block"))]
     async fn place_layout_block(
         &self,
@@ -606,7 +630,7 @@ impl Lamina {
         self.with(|proj| proj.unplace(p))
     }
 
-    /// Distance between two pads (`U1.3`), parts (`U1`) or points.
+    /// Measure the distance between two pads (`U1.3`), parts (`U1`) or points.
     #[tool(annotations(title = "Measure", read_only_hint = true))]
     async fn measure(
         &self,
@@ -615,8 +639,8 @@ impl Lamina {
         self.with(|proj| proj.measure(p))
     }
 
-    /// Add a trace on one copper layer. Points are `{x, y}` or pad
-    /// references like `U1.3`, which snap to the pad centre.
+    /// Add a trace on one copper layer. Each point is `{x, y}` or a pad
+    /// reference, for example `U1.3`. A pad reference snaps to the pad centre.
     #[tool(annotations(title = "Route trace"))]
     async fn route_trace(
         &self,
@@ -631,7 +655,7 @@ impl Lamina {
         self.with(|proj| proj.add_via(p))
     }
 
-    /// Add a copper pour (zone). The outline defaults to the board outline.
+    /// Add a copper pour (zone). By default, its outline is the board outline.
     #[tool(annotations(title = "Add zone"))]
     async fn add_zone(
         &self,
@@ -649,7 +673,8 @@ impl Lamina {
         self.with(|proj| proj.add_keepout(p))
     }
 
-    /// Add a board-level mounting hole (plated when pad_diameter is given).
+    /// Add a mounting hole to the board. If you give pad_diameter, the hole is
+    /// plated.
     #[tool(annotations(title = "Add hole"))]
     async fn add_hole(
         &self,
@@ -682,12 +707,12 @@ impl Lamina {
         self.with(|proj| proj.delete_items(p))
     }
 
-    /// Route every open connection (45-degree tracks, vias between layers)
-    /// with the built-in router: nets negotiate for space, failures are
-    /// repaired on a finer grid, and pours are refilled with what they leave
-    /// open routed too. Add pours (`add_zone`) first: a poured net then only
-    /// gets wires where its pour cannot reach. `skip` is for nets you route
-    /// by hand.
+    /// Route all open connections (45-degree tracks, vias between layers)
+    /// with the built-in router. The nets negotiate for space. The router
+    /// repairs failed connections on a finer grid. Then it fills the pours
+    /// again and routes the connections that the pours leave open. Add pours
+    /// (`add_zone`) first: a net with a pour then gets wires only where its
+    /// pour cannot reach. Use `skip` for nets that you route by hand.
     #[tool(annotations(title = "Autoroute"))]
     async fn autoroute(
         &self,
@@ -696,24 +721,25 @@ impl Lamina {
         self.with(|proj| proj.autoroute(p))
     }
 
-    /// Unrouted connections as pad-to-pad lines.
+    /// The connections that are not routed, as lines from pad to pad.
     #[tool(annotations(title = "Ratsnest", read_only_hint = true))]
     async fn ratsnest(&self) -> Result<CallToolResult, McpError> {
         self.with(|proj| Ok(proj.ratsnest()))
     }
     /// Render the board to PNG and return it as an image. Views: `layers`
-    /// (technical, pick layers), `top` / `bottom` (finished board), `3d`
-    /// (perspective with part models; set yaw and pitch). Saved in cache/render.
+    /// (technical view, select the layers), `top` / `bottom` (the finished
+    /// board), `3d` (perspective with part models, set yaw and pitch). The
+    /// tool saves the PNG in cache/render.
     #[tool(annotations(title = "Render", read_only_hint = true))]
     async fn render(&self, Parameters(p): Parameters<Render>) -> Result<CallToolResult, McpError> {
         let mut guard = self.project.lock().unwrap_or_else(|p| p.into_inner());
         let Some(proj) = guard.as_mut() else {
             return Ok(error_result(
-                "no project is open; call `open` with a folder path first",
+                "No project is open. Call `open` with a folder path first.",
             ));
         };
         if let Err(e) = proj.sync() {
-            return Ok(error_result(format!("could not re-read the project: {e}")));
+            return Ok(error_result(format!("Cannot read the project again: {e}")));
         }
         match proj.render(p) {
             Ok(r) => {
@@ -729,15 +755,15 @@ impl Lamina {
         }
     }
     /// Write Gerber X2, Excellon (PTH and NPTH), JLCPCB BOM and CPL files and
-    /// a gerber zip into the project's output folder. Refuses while DRC has
-    /// errors unless `force` is true.
+    /// a Gerber zip into the output folder of the project. If DRC has errors
+    /// and `force` is not true, the tool refuses.
     #[tool(annotations(title = "Export for fabrication"))]
     async fn export(&self, Parameters(p): Parameters<Export>) -> Result<CallToolResult, McpError> {
         self.with(|proj| proj.export(p))
     }
 
-    /// Notes the user left in the viewer (open ones by default). Read these
-    /// before and after each round of changes.
+    /// The notes that the user wrote in the viewer (by default, only the open
+    /// notes). Read them before and after each set of changes.
     #[tool(annotations(title = "Notes", read_only_hint = true))]
     async fn notes(
         &self,
@@ -746,7 +772,7 @@ impl Lamina {
         self.with(|proj| Ok(proj.list_notes(p)))
     }
 
-    /// Leave a note for the user (shown in the viewer).
+    /// Write a note for the user. The viewer shows it.
     #[tool(annotations(title = "Add note"))]
     async fn add_note(
         &self,
@@ -755,7 +781,7 @@ impl Lamina {
         self.with(|proj| proj.add_note(p))
     }
 
-    /// Mark notes as handled.
+    /// Mark notes as resolved.
     #[tool(annotations(title = "Resolve notes"))]
     async fn resolve_notes(
         &self,
@@ -766,9 +792,10 @@ impl Lamina {
                 .map(|n| serde_json::json!({"resolved": n}))
         })
     }
-    /// Use a different 3D model (STEP or OBJ) for a footprint, e.g. the
-    /// manufacturer's own STEP. Reply includes the model's raw bounds to
-    /// work out the offset that centres it on the pads.
+    /// Use a different 3D model (STEP or OBJ) for a footprint, for example the
+    /// STEP file of the manufacturer. The reply includes the raw bounds of the
+    /// model. Use them to calculate the offset that puts the model on the
+    /// centre of the pads.
     #[tool(annotations(title = "Set 3D model"))]
     async fn set_model(
         &self,

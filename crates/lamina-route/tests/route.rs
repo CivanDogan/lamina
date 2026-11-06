@@ -17,7 +17,7 @@ fn board() -> ProjectData {
         d.parts.parts.insert(r.into(), Part::new(f));
         d.placement.placements.insert(r.into(), Placement::at(x, y));
     }
-    // A crosses under/around U1; B and C are short.
+    // A goes under or around U1. B and C are short.
     let net = |pads: &[&str]| Net {
         pads: pads.iter().map(|p| p.parse().unwrap()).collect(),
         class: None,
@@ -56,7 +56,7 @@ fn routes_without_errors() {
             let dy = (w[1].y - w[0].y).abs();
             assert!(
                 dx < 1e-6 || dy < 1e-6 || (dx - dy).abs() < 1e-6,
-                "{} not octilinear: {:?}",
+                "{} is not octilinear: {:?}",
                 t.id,
                 w
             );
@@ -89,9 +89,9 @@ fn skip_nets() {
 
 #[test]
 fn crossing_bus_is_negotiated_clean() {
-    // Two SOIC-8s side by side, pin k of U1 to pin k of U2: the nets from
-    // U1's far row must cross the others, so the router needs vias and
-    // negotiation to finish without shorts.
+    // Two SOIC-8s side by side. Pin k of U1 connects to pin k of U2. The nets
+    // from the far row of U1 must cross the other nets. Thus, the router needs
+    // vias and negotiation to finish without shorts.
     let mut d = ProjectData::new("x");
     d.board.outline = Some(Contour::rect(0.0, 0.0, 30.0, 20.0));
     let fp = from_package("SOIC-8", &Options::default(), None).unwrap();
@@ -131,8 +131,8 @@ fn crossing_bus_is_negotiated_clean() {
 
 #[test]
 fn vias_respect_copper_on_layers_the_router_may_not_use() {
-    // 4 layers, routing on top and bottom only. In1 is covered by another
-    // net, so any through via would short there: the net must fail, not short.
+    // 4 layers. The router uses only top and bottom. Another net covers In1,
+    // so a through via will cause a short there. The net must fail, not short.
     let mut d = ProjectData::new("x");
     d.board.outline = Some(Contour::rect(0.0, 0.0, 30.0, 20.0));
     d.board.stackup.copper_layers = 4;

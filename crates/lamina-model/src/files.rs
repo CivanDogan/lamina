@@ -31,13 +31,13 @@ pub struct BoardFile {
     #[serde(default = "schema_v")]
     pub schema: u32,
     pub name: String,
-    /// Board edge. `None` until set.
+    /// The edge of the board. `None` until you set it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<Contour>,
     /// Internal cut-outs through the board.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cutouts: Vec<Contour>,
-    /// Mechanical holes not belonging to a part.
+    /// Mechanical holes that do not belong to a part.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub holes: Vec<Hole>,
     pub stackup: Stackup,
@@ -65,7 +65,7 @@ pub struct Hole {
     pub drill: Drill,
     #[serde(default, skip_serializing_if = "is_false")]
     pub plated: bool,
-    /// Copper ring diameter for plated holes.
+    /// The diameter of the copper ring for plated holes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pad_diameter: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -78,12 +78,12 @@ pub struct Hole {
 pub struct Stackup {
     /// 1, or an even number from 2 to 32.
     pub copper_layers: u8,
-    /// Finished board thickness in mm.
+    /// The thickness of the finished board, in mm.
     pub thickness: f64,
-    /// Outer copper weight in oz.
+    /// The weight of the outer copper, in oz.
     #[serde(default = "one")]
     pub outer_copper_oz: f64,
-    /// Inner copper weight in oz.
+    /// The weight of the inner copper, in oz.
     #[serde(default = "half")]
     pub inner_copper_oz: f64,
     /// Surface finish, for example `HASL`, `LeadFree HASL`, `ENIG`.
@@ -130,20 +130,23 @@ impl Stackup {
         let n = self.copper_layers;
         if !(n == 1 || ((2..=32).contains(&n) && n.is_multiple_of(2))) {
             return Err(format!(
-                "copper_layers must be 1 or an even number 2..32, got {n}"
+                "copper_layers is {n}. It must be 1 or an even number from 2 to 32."
             ));
         }
         if !(self.thickness.is_finite() && self.thickness > 0.1 && self.thickness < 10.0) {
-            return Err(format!("thickness {} mm is out of range", self.thickness));
+            return Err(format!(
+                "The thickness {} mm is out of range. Use more than 0.1 mm and less than 10 mm.",
+                self.thickness
+            ));
         }
         Ok(())
     }
 }
 
-/// Design rules. All sizes in mm.
+/// Design rules. All sizes are in mm.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Rules {
-    /// Fab preset these rules came from, if any.
+    /// The fab preset that these rules came from, if there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
     pub clearance: f64,
@@ -221,7 +224,7 @@ pub struct NetClass {
 pub struct PartsFile {
     #[serde(default = "schema_v")]
     pub schema: u32,
-    /// Keyed by reference designator.
+    /// The key is the reference designator.
     #[serde(default)]
     pub parts: BTreeMap<String, Part>,
 }
@@ -246,8 +249,8 @@ pub struct Part {
     pub dnp: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fields: BTreeMap<String, String>,
-    /// Block instance this part belongs to, for example `servo1`. Parts of
-    /// one group move together and can take another group's layout.
+    /// The block instance that this part belongs to, for example `servo1`.
+    /// Parts of one group move together. They can take the layout of another group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
 }
@@ -319,12 +322,12 @@ impl FromStr for PadRef {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (part, pad) = s
             .split_once('.')
-            .ok_or_else(|| format!("pad reference `{s}` must look like `U1.3`"))?;
+            .ok_or_else(|| format!("The pad reference `{s}` is not valid. Use the form `U1.3`."))?;
         if !valid_refdes(part) {
-            return Err(format!("bad reference designator in `{s}`"));
+            return Err(format!("The reference designator in `{s}` is not valid."));
         }
         if pad.is_empty() {
-            return Err(format!("empty pad number in `{s}`"));
+            return Err(format!("The pad number in `{s}` is empty."));
         }
         Ok(PadRef::new(part, pad))
     }
@@ -368,13 +371,13 @@ pub struct NetsFile {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct Net {
     pub pads: Vec<PadRef>,
-    /// Net class name from the board rules.
+    /// The name of a net class in the board rules.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
 }
 
 impl NetsFile {
-    /// Net that a pad belongs to.
+    /// The net that a pad belongs to.
     pub fn net_of(&self, pad: &PadRef) -> Option<&str> {
         self.nets
             .iter()
@@ -438,8 +441,8 @@ impl Placement {
         Point::new(self.x, self.y)
     }
 
-    /// Footprint-local point to board coordinates. Bottom-side parts are
-    /// mirrored in X first; rotation is CCW as seen from the top.
+    /// Changes a footprint-local point to board coordinates. Parts on the bottom
+    /// side are mirrored in X first. The rotation is CCW when you look from the top.
     pub fn transform(&self, p: Point) -> Point {
         let p = if self.side == Side::Bottom {
             Point::new(-p.x, p.y)
@@ -449,7 +452,7 @@ impl Placement {
         p.rotated(self.rotation).add(self.origin())
     }
 
-    /// Board coordinates back to footprint-local.
+    /// Changes board coordinates back to footprint-local coordinates.
     pub fn inverse(&self, p: Point) -> Point {
         let q = p.sub(self.origin()).rotated(-self.rotation);
         if self.side == Side::Bottom {
@@ -506,10 +509,10 @@ pub struct Via {
     pub at: Point,
     pub diameter: f64,
     pub drill: f64,
-    /// Start layer; `None` means top (through via).
+    /// The start layer. `None` means top (through via).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<Layer>,
-    /// End layer; `None` means bottom (through via).
+    /// The end layer. `None` means bottom (through via).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<Layer>,
 }
@@ -526,12 +529,12 @@ pub enum PadConnection {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Zone {
     pub id: String,
-    /// `None` for an unconnected copper island fill.
+    /// `None` makes a copper island fill that has no net.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net: Option<String>,
     pub layers: Vec<Layer>,
     pub outline: Contour,
-    /// Higher priority fills first and wins overlaps.
+    /// A zone with a higher priority fills first and wins where zones overlap.
     #[serde(default)]
     pub priority: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -599,7 +602,7 @@ pub struct NotesFile {
     pub notes: Vec<Note>,
 }
 
-/// A comment left by the user in the viewer, or by the agent.
+/// A comment from the user in the viewer, or from the agent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Note {
     pub id: String,
@@ -610,7 +613,7 @@ pub struct Note {
     pub refdes: Option<String>,
     /// `user` or `agent`.
     pub author: String,
-    /// Seconds since the Unix epoch.
+    /// Seconds after the Unix epoch.
     pub created: u64,
     #[serde(default, skip_serializing_if = "is_false")]
     pub resolved: bool,
@@ -627,7 +630,7 @@ pub enum Severity {
     Warning,
 }
 
-/// A rule failure found by validation or DRC.
+/// A rule failure that validation or DRC found.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Violation {
     /// Stable rule id, for example `clearance` or `pad_in_two_nets`.
@@ -638,7 +641,7 @@ pub struct Violation {
     pub at: Option<Point>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layer: Option<Layer>,
-    /// Ids of the items involved (refdes, pad refs, track ids).
+    /// The ids of the related items (refdes, pad refs, track ids).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<String>,
 }
@@ -677,7 +680,7 @@ impl Violation {
         self
     }
 
-    /// Identity used to tell new violations from existing ones.
+    /// The identity that tells new violations from old violations.
     pub fn key(&self) -> String {
         let mut items = self.items.clone();
         items.sort();

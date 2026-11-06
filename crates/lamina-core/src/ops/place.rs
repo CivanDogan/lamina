@@ -12,10 +12,11 @@ pub struct Place {
     pub refdes: String,
     pub x: f64,
     pub y: f64,
-    /// Degrees counter-clockwise (default: keep current, or 0).
+    /// The rotation in degrees counter-clockwise. The default keeps the
+    /// rotation that the part has, or 0.
     #[serde(default)]
     pub rotation: Option<f64>,
-    /// `top` or `bottom` (default: keep current, or top).
+    /// `top` or `bottom`. The default keeps the side that the part has, or `top`.
     #[serde(default)]
     pub side: Option<Side>,
     #[serde(default)]
@@ -26,7 +27,7 @@ pub struct Place {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct PlaceMany {
-    /// Refdes to placement.
+    /// A map from the refdes to its placement.
     pub placements: BTreeMap<String, Placement>,
     #[serde(default)]
     pub strict: bool,
@@ -78,9 +79,10 @@ pub enum Axis {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Align {
     pub refdes: Vec<String>,
-    /// `x` aligns X coordinates (a vertical line), `y` aligns Y.
+    /// `x` makes the X coordinates equal (a vertical line). `y` makes the
+    /// Y coordinates equal.
     pub axis: Axis,
-    /// Target coordinate; default is the first part's coordinate.
+    /// The target coordinate. The default is the coordinate of the first part.
     #[serde(default)]
     pub to: Option<f64>,
     #[serde(default)]
@@ -89,13 +91,14 @@ pub struct Align {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Distribute {
-    /// Parts in order.
+    /// The parts, in order.
     pub refdes: Vec<String>,
     pub axis: Axis,
-    /// Start coordinate (default: first part).
+    /// The start coordinate (default: the coordinate of the first part).
     #[serde(default)]
     pub from: Option<f64>,
-    /// Centre-to-centre spacing; default spreads evenly from first to last.
+    /// The spacing from centre to centre. The default spreads the parts
+    /// equally from the first part to the last part.
     #[serde(default)]
     pub spacing: Option<f64>,
     #[serde(default)]
@@ -109,7 +112,7 @@ pub struct Unplace {
     pub strict: bool,
 }
 
-/// A location: pad reference (`U1.3`), refdes (`U1`) or a point.
+/// A location: a pad reference (`U1.3`), a refdes (`U1`) or a point.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Target {
@@ -131,7 +134,7 @@ pub struct Measurement {
     pub dy: f64,
     /// Centre to centre.
     pub distance: f64,
-    /// Copper edge to copper edge, when both ends are pads.
+    /// From copper edge to copper edge, if both ends are pads.
     pub edge_distance: Option<f64>,
 }
 
@@ -139,7 +142,10 @@ fn check_point(x: f64, y: f64) -> Result<()> {
     if x.is_finite() && y.is_finite() && x.abs() < 10_000.0 && y.abs() < 10_000.0 {
         Ok(())
     } else {
-        Err(Error::invalid(format!("position ({x}, {y}) is not usable")))
+        Err(Error::invalid(format!(
+            "The position ({x}, {y}) is not valid. Each coordinate must be a finite \
+             number between -10000 and 10000 mm."
+        )))
     }
 }
 
@@ -153,7 +159,7 @@ impl Project {
         if self.data.parts.parts.contains_key(r) {
             Ok(())
         } else {
-            Err(Error::invalid(format!("no part {r}")))
+            Err(Error::invalid(format!("The part {r} does not exist.")))
         }
     }
 
@@ -164,7 +170,9 @@ impl Project {
             .placements
             .get(r)
             .copied()
-            .ok_or_else(|| Error::invalid(format!("{r} is not placed yet; use place")))
+            .ok_or_else(|| {
+                Error::invalid(format!("{r} is not placed yet. Place it first with place."))
+            })
     }
 
     pub fn place(&mut self, p: Place) -> Result<OpResult> {
@@ -219,7 +227,9 @@ impl Project {
         for r in &p.refdes {
             let mut pl = self.need_placed(r)?;
             if pl.locked && !p.force {
-                return Err(Error::Refused(format!("{r} is locked; pass force: true")));
+                return Err(Error::Refused(format!(
+                    "{r} is locked. Set force: true to move it."
+                )));
             }
             pl.x = json::round6(pl.x + p.dx);
             pl.y = json::round6(pl.y + p.dy);
@@ -238,14 +248,14 @@ impl Project {
         let mut pl = self.need_placed(&p.refdes)?;
         if pl.locked && !p.force {
             return Err(Error::Refused(format!(
-                "{} is locked; pass force: true",
+                "{} is locked. Set force: true to rotate it.",
                 p.refdes
             )));
         }
         pl.rotation = match (p.rotation, p.by) {
             (Some(a), None) => norm_deg(a),
             (None, Some(b)) => norm_deg(pl.rotation + b),
-            _ => return Err(Error::invalid("give exactly one of `rotation` and `by`")),
+            _ => return Err(Error::invalid("Give exactly one of `rotation` and `by`.")),
         };
         let mut d = self.data.clone();
         d.placement.placements.insert(p.refdes.clone(), pl);
@@ -261,7 +271,7 @@ impl Project {
         let mut pl = self.need_placed(&p.refdes)?;
         if pl.locked && !p.force {
             return Err(Error::Refused(format!(
-                "{} is locked; pass force: true",
+                "{} is locked. Set force: true to flip it.",
                 p.refdes
             )));
         }
@@ -278,7 +288,9 @@ impl Project {
 
     pub fn align(&mut self, p: Align) -> Result<OpResult> {
         if p.refdes.is_empty() {
-            return Err(Error::invalid("no parts given"));
+            return Err(Error::invalid(
+                "No parts are given. Give at least one refdes.",
+            ));
         }
         let first = self.need_placed(&p.refdes[0])?;
         let to = p.to.unwrap_or(match p.axis {
@@ -304,7 +316,7 @@ impl Project {
 
     pub fn distribute(&mut self, p: Distribute) -> Result<OpResult> {
         if p.refdes.len() < 2 {
-            return Err(Error::invalid("give at least two parts"));
+            return Err(Error::invalid("Give at least two parts."));
         }
         let coord = |pl: &Placement| match p.axis {
             Axis::X => pl.x,
@@ -342,7 +354,7 @@ impl Project {
         let mut d = self.data.clone();
         for r in &p.refdes {
             if d.placement.placements.remove(r).is_none() {
-                return Err(Error::invalid(format!("{r} is not placed")));
+                return Err(Error::invalid(format!("{r} is not placed.")));
             }
         }
         self.commit(
@@ -353,31 +365,29 @@ impl Project {
         )
     }
 
-    /// Board position of a pad.
+    /// The position of a pad on the board.
     pub fn pad_position(&self, pr: &PadRef) -> Result<(Point, lamina_geom::Prim, Vec<u8>)> {
         let part = self
             .data
             .parts
             .parts
             .get(&pr.part)
-            .ok_or_else(|| Error::invalid(format!("no part {}", pr.part)))?;
+            .ok_or_else(|| Error::invalid(format!("The part {} does not exist.", pr.part)))?;
         let pl = self
             .data
             .placement
             .placements
             .get(&pr.part)
-            .ok_or_else(|| Error::invalid(format!("{} is not placed", pr.part)))?;
-        let fp = self
-            .data
-            .footprints
-            .get(&part.footprint)
-            .ok_or_else(|| Error::invalid(format!("no footprint {}", part.footprint)))?;
+            .ok_or_else(|| Error::invalid(format!("{} is not placed.", pr.part)))?;
+        let fp = self.data.footprints.get(&part.footprint).ok_or_else(|| {
+            Error::invalid(format!("The footprint {} does not exist.", part.footprint))
+        })?;
         let layers = self.data.board.stackup.copper_layers;
         let pads = lamina_geom::placed_pads(fp, pl, layers);
         let (pad, _, prim, ls) = pads
             .into_iter()
             .find(|(p, ..)| p.number == pr.pad)
-            .ok_or_else(|| Error::invalid(format!("{pr}: no such pad")))?;
+            .ok_or_else(|| Error::invalid(format!("{pr}: this pad does not exist.")))?;
         Ok((pl.transform(pad.at), prim, ls))
     }
 

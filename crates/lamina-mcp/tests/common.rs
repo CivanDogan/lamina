@@ -65,7 +65,7 @@ impl Client {
         }
     }
 
-    /// Call a tool; returns (is_error, parsed JSON or raw text).
+    /// Call a tool. Return (is_error, parsed JSON or raw text).
     pub fn call(&mut self, name: &str, args: Value) -> (bool, Value) {
         let r = self.request("tools/call", json!({"name": name, "arguments": args}));
         let res = &r["result"];

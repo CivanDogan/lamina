@@ -29,7 +29,7 @@ fn copper_ext(i: u8, n: u8) -> (String, String) {
     }
 }
 
-/// Gerber files for every layer of the scene.
+/// Make the Gerber files for all layers of the scene.
 pub fn gerbers(s: &Scene2D, name: &str) -> Vec<Output> {
     let n = s.copper_layers;
     let mut jobs: Vec<(SceneLayer, String, String, &'static str)> = Vec::new();
@@ -68,8 +68,8 @@ pub fn gerbers(s: &Scene2D, name: &str) -> Vec<Output> {
     for (layer, ext, function, polarity) in jobs {
         let mut w = gerber::Writer::new();
         if let Some(d) = s.layer(layer) {
-            // Lower-priority pours first so their cleared holes never erase a
-            // higher-priority pour drawn later.
+            // Draw the pours with a lower priority first. Then their clear holes
+            // cannot erase a pour with a higher priority.
             for g in d.items[..d.pour].iter().rev() {
                 w.add(g);
             }
@@ -87,7 +87,7 @@ pub fn gerbers(s: &Scene2D, name: &str) -> Vec<Output> {
     out
 }
 
-/// Excellon drill files: plated and non-plated.
+/// Make the Excellon drill files: plated and non-plated.
 pub fn drills(g: &lamina_geom::BoardGeometry, name: &str) -> Vec<Output> {
     let mut out = Vec::new();
     for plated in [true, false] {
@@ -147,7 +147,7 @@ fn csv(s: &str) -> String {
     }
 }
 
-/// JLCPCB assembly BOM and pick-and-place files.
+/// Make the JLCPCB assembly BOM and the pick-and-place files.
 pub fn assembly(d: &ProjectData, name: &str) -> (Vec<Output>, Vec<String>) {
     let mut warnings = Vec::new();
     let mut groups: BTreeMap<(String, String, String), Vec<String>> = BTreeMap::new();
@@ -157,7 +157,7 @@ pub fn assembly(d: &ProjectData, name: &str) -> (Vec<Output>, Vec<String>) {
         }
         if p.lcsc.is_none() {
             warnings.push(format!(
-                "{r} has no LCSC part number; JLCPCB will not place it"
+                "{r} has no LCSC part number, so JLCPCB will not place it"
             ));
         }
         let key = (
@@ -202,7 +202,7 @@ pub fn assembly(d: &ProjectData, name: &str) -> (Vec<Output>, Vec<String>) {
     }
     for r in d.parts.parts.keys() {
         if !d.placement.placements.contains_key(r) && !d.parts.parts[r].dnp {
-            warnings.push(format!("{r} is not placed and is missing from the CPL"));
+            warnings.push(format!("{r} is not placed, so it is not in the CPL"));
         }
     }
     (
@@ -228,7 +228,7 @@ fn natural(a: &str, b: &str) -> std::cmp::Ordering {
     split(a).cmp(&split(b)).then(a.cmp(b))
 }
 
-/// Write files to `dir`, plus a zip of the fabrication files.
+/// Write the files to `dir`, and a zip of the fabrication files.
 pub fn write(
     dir: &Path,
     name: &str,

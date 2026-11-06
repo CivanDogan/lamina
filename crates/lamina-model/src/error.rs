@@ -14,9 +14,9 @@ pub enum Error {
         path: PathBuf,
         source: serde_json::Error,
     },
-    #[error("{0} is not a Lamina project (no board.json)")]
+    #[error("{0} is not a Lamina project (it has no board.json).")]
     NotAProject(PathBuf),
-    #[error("project is open in another Lamina process (pid {0})")]
+    #[error("The project is open in another Lamina process (pid {0}). Close it and try again.")]
     Locked(u32),
     #[error("{0}")]
     Invalid(String),

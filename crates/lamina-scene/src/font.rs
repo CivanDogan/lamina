@@ -1,5 +1,5 @@
-//! A single-stroke font for silkscreen and fab text. Glyphs sit on a 4 x 6
-//! grid (cap height 6, advance 5); text size is the cap height in mm.
+//! A single-stroke font for silkscreen and fab text. Each glyph is on a 4 x 6
+//! grid (cap height 6, advance 5). The text size is the cap height in mm.
 
 use lamina_model::Point;
 
@@ -260,8 +260,8 @@ fn glyph(c: char) -> &'static [Stroke] {
     }
 }
 
-/// Stroke polylines for `text`, centred on `at`, rotated by `rotation`
-/// degrees. `size` is the cap height in mm.
+/// Return the stroke polylines for `text`, with the centre at `at` and a
+/// rotation of `rotation` degrees. `size` is the cap height in mm.
 pub fn text_strokes(text: &str, at: Point, size: f64, rotation: f64) -> Vec<Vec<Point>> {
     let s = size / 6.0;
     let n = text.chars().count();

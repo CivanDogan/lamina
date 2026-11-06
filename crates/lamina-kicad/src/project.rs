@@ -8,7 +8,7 @@ fn r6(v: f64) -> f64 {
     (v * 1e6).round() / 1e6
 }
 
-/// KiCad's net class pattern: `*` and `?` wildcards, else an exact name.
+/// The KiCad net class pattern: `*` and `?` wildcards, or an exact name.
 fn wildcard(pattern: &str, name: &str) -> bool {
     fn go(p: &[char], n: &[char]) -> bool {
         match (p.first(), n.first()) {
@@ -25,9 +25,10 @@ fn wildcard(pattern: &str, name: &str) -> bool {
 }
 
 /// Apply the rules, net classes and class assignments of a `.kicad_pro`
-/// to an imported board. Returns notes on what was taken.
+/// to an imported board. Returns notes about the data that it used.
 pub fn apply_project(d: &mut ProjectData, pro: &str) -> Result<Vec<String>, String> {
-    let v: Value = serde_json::from_str(pro).map_err(|e| format!("bad .kicad_pro: {e}"))?;
+    let v: Value =
+        serde_json::from_str(pro).map_err(|e| format!("the .kicad_pro file is not valid: {e}"))?;
     let rules = &mut d.board.rules;
     let num = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64).filter(|x| *x > 0.0);
 
@@ -52,7 +53,7 @@ pub fn apply_project(d: &mut ProjectData, pro: &str) -> Result<Vec<String>, Stri
     let ns = &v["net_settings"];
     let classes = ns["classes"].as_array().cloned().unwrap_or_default();
     let mut named = 0;
-    // KiCad 6/7 list a class's nets inside the class.
+    // KiCad 6/7 lists the nets of a class in the class.
     let mut members: Vec<(String, String)> = Vec::new();
     for c in &classes {
         let Some(name) = c["name"].as_str() else {

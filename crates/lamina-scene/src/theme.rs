@@ -1,4 +1,4 @@
-//! Colours for layers and for the physical board appearance.
+//! Colours for the layers and for the physical appearance of the board.
 
 use crate::SceneLayer;
 use lamina_model::{Copper, Side};
@@ -57,7 +57,7 @@ pub fn silk(name: &str) -> Rgba {
     }
 }
 
-/// Exposed copper colour for a surface finish.
+/// The colour of exposed copper for a surface finish.
 pub fn finish(name: &str) -> Rgba {
     let n = name.to_ascii_lowercase();
     if n.contains("enig") || n.contains("gold") {

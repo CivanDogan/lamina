@@ -1,15 +1,19 @@
-//! Grid autorouter with negotiated congestion (PathFinder).
+//! A grid autorouter with negotiated congestion (PathFinder).
 //!
-//! Every net is routed as a tree: each connection starts from the copper
-//! the net already has and ends on the nearest copper of the part it joins.
-//! Static obstacles (other nets' pads and existing copper, keep-outs, the
-//! board edge) are hard. New wires of different nets may overlap at first;
-//! each pass makes contested cells dearer (present and history costs) and
-//! reroutes the nets that still overlap, until none do. Nets left in
-//! conflict at the end are routed strictly around the others or reported.
-//! Paths are straightened to 45-degree runs afterwards, keeping T-junctions
-//! and vias where they are. A connection that cannot be made at the class
-//! width is tried again at the minimum track width.
+//! The router routes each net as a tree. Each connection starts from the
+//! copper that the net already has. It ends on the nearest copper of the part
+//! that it connects.
+//!
+//! Static obstacles are hard: the pads and copper of other nets, keep-outs
+//! and the board edge. At first, new wires of different nets can overlap.
+//! Each pass increases the cost of the shared cells (present and history
+//! costs). Then it routes the nets that still overlap again, until no nets
+//! overlap. At the end, the router routes the remaining nets in conflict
+//! strictly around the other nets, or reports them.
+//!
+//! Then the router changes the paths to straight 45-degree runs. T-junctions
+//! and vias stay where they are. If a connection is not possible at the class
+//! width, the router tries again at the minimum track width.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap};
@@ -21,14 +25,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RouteOptions {
-    /// Nets to route (default: every net with unrouted connections).
+    /// Nets to route (default: all nets with unrouted connections).
     #[serde(default)]
     pub nets: Option<Vec<String>>,
-    /// Nets to leave alone (routed by hand). A net with a pour need not be
-    /// skipped: it is routed only where its pour does not reach.
+    /// Nets that the router does not change (for example, nets routed by hand).
+    /// It is not necessary to skip a net with a pour. The router routes it only
+    /// where its pour does not reach.
     #[serde(default)]
     pub skip: Vec<String>,
-    /// Copper layers the router may use (default all).
+    /// Copper layers that the router can use (default: all).
     #[serde(default)]
     pub layers: Option<Vec<Layer>>,
     /// Grid pitch in mm (default 0.1).
@@ -37,10 +42,10 @@ pub struct RouteOptions {
     /// Cost of a via in grid steps (default 25).
     #[serde(default)]
     pub via_cost: Option<f64>,
-    /// Give up after this many seconds in total (default 60).
+    /// Stop after this number of seconds in total (default 60).
     #[serde(default)]
     pub time_limit: Option<f64>,
-    /// Most rip-up-and-reroute passes (default 40).
+    /// The maximum number of rip-up-and-reroute passes (default 40).
     #[serde(default)]
     pub passes: Option<u32>,
 }
@@ -59,7 +64,7 @@ pub struct RouteOutcome {
     pub vias: Vec<Via>,
     pub routed: Vec<String>,
     pub failed: Vec<Failure>,
-    /// Rip-up-and-reroute passes used.
+    /// The number of rip-up-and-reroute passes that the router used.
     pub passes: u32,
 }
 
@@ -97,7 +102,7 @@ impl Grid {
     fn idx(&self, l: usize, ix: usize, iy: usize) -> usize {
         l * self.plane() + iy * self.nx + ix
     }
-    /// Cells whose centres fall in the rectangle grown by `m`.
+    /// Cells with centres in the rectangle, made larger by `m`.
     fn range(&self, r: &Rect, m: f64) -> (usize, usize, usize, usize) {
         let lo = self.cell(Point::new(r.min.x - m, r.min.y - m));
         let hi = self.cell(Point::new(r.max.x + m, r.max.y + m));
@@ -118,7 +123,7 @@ impl Grid {
     }
 }
 
-/// Cells whose centres lie inside a polygon with holes (even-odd scanline).
+/// Cells with centres in a polygon with holes (even-odd scanline).
 fn raster(g: &Grid, outer: &[Point], holes: &[Vec<Point>], l: usize, out: &mut Vec<usize>) {
     let Some(bb) = Rect::from_points(outer.iter().copied()) else {
         return;
@@ -160,7 +165,7 @@ const FREE: u32 = u32::MAX;
 const HARD: u32 = u32::MAX - 1;
 const MULTI: u32 = u32::MAX - 2;
 
-/// Track and via sizes plus clearance a net is routed with.
+/// The track and via sizes and the clearance that the router uses for a net.
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct Profile {
     hw: f64,
@@ -175,20 +180,20 @@ impl Profile {
     }
 }
 
-/// Static obstacle map for one profile: who owns each cell.
+/// The static obstacle map for one profile: the owner of each cell.
 struct Statics {
     p: Profile,
-    /// Net index whose copper (with clearance) covers the cell, FREE, HARD or MULTI.
+    /// The index of the net with copper (and clearance) on the cell, or FREE, HARD or MULTI.
     owner: Vec<u32>,
-    /// A via may be drilled here (holes, via keep-outs and the edge).
+    /// A via can be drilled here. This checks holes, via keep-outs and the edge.
     drill_ok: Vec<bool>,
     /// Cell offsets within `via_r - hw`, for via copper checks.
     via_disk: Vec<(isize, isize)>,
-    /// Other nets' new wires and vias covering the cell, for this profile.
+    /// The number of new wires and vias of other nets on the cell, for this profile.
     occ: Vec<u16>,
 }
 
-/// Geometry of a routed net, kept to stamp and unstamp it.
+/// The geometry of a routed net. It is kept to stamp and unstamp the net.
 #[derive(Clone, Default)]
 struct Routed {
     /// Paths as cell chains (layer-qualified cells).
@@ -197,8 +202,8 @@ struct Routed {
     vias: Vec<(usize, usize)>,
     /// Profile index of each path.
     path_profile: Vec<usize>,
-    /// Coverage per profile, filled on demand (geometry never changes
-    /// after a `Routed` is built).
+    /// The coverage for each profile, filled when necessary. The geometry does
+    /// not change after a `Routed` is built.
     cov: Vec<Vec<u32>>,
 }
 
@@ -221,9 +226,9 @@ impl<'a> Ctx<'a> {
             .board
             .outline
             .as_ref()
-            .ok_or("board outline is not set")?
+            .ok_or("the board outline is not set")?
             .flatten(0.01);
-        let bb = Rect::from_points(outline.iter().copied()).ok_or("empty outline")?;
+        let bb = Rect::from_points(outline.iter().copied()).ok_or("the board outline is empty")?;
         let mut pitch = opt.grid.unwrap_or(0.1).clamp(0.02, 1.0);
         let nl = d.board.stackup.copper_layers as usize;
         while (bb.width() / pitch) * (bb.height() / pitch) * nl as f64 > 6.0e6 {
@@ -245,12 +250,12 @@ impl<'a> Ctx<'a> {
                 edges.push((r[k], r[(k + 1) % r.len()]));
             }
         }
-        // Inside test by scanline, distance only within a band of the edge
-        // (nothing needs more): O(cells + edges * band) instead of
-        // O(cells * edges).
+        // Find the inside cells with a scanline. Calculate the distance only in
+        // a band along the edge, because no check needs more. This is
+        // O(cells + edges * band), not O(cells * edges).
         let mut inside_cells = Vec::new();
         raster(&g, &rings[0], &rings[1..], 0, &mut inside_cells);
-        // Wide enough for the largest edge rule plus a via.
+        // The band is wide enough for the largest edge rule and a via.
         let band = (d.board.rules.copper_to_edge + 2.0) as f32;
         let mut edge_dist = vec![-band; g.plane()];
         for c in inside_cells {
@@ -326,8 +331,8 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// Index of the static map for `p`, built on first use. New wires
-    /// already routed are stamped into it too.
+    /// The index of the static map for `p`. The map is built when it is first
+    /// used. The new wires that are already routed are also stamped into it.
     fn statics(&mut self, p: Profile, routed: &[Routed]) -> usize {
         if let Some(i) = self.profiles.iter().position(|s| s.p.key() == p.key()) {
             return i;
@@ -338,8 +343,8 @@ impl<'a> Ctx<'a> {
         let mut owner = vec![FREE; n];
         let margin = g.pitch * 0.75;
         let edge_need = (rules.copper_to_edge + p.hw) as f32;
-        // Layers the router may not use keep their real owners: a through
-        // via still has copper there and must clear other nets.
+        // Layers that the router cannot use keep their real owners. A through
+        // via also has copper on them and must have clearance to other nets.
         for l in 0..g.nl {
             for i in 0..g.plane() {
                 if self.edge_dist[i] < edge_need {
@@ -459,7 +464,7 @@ impl<'a> Ctx<'a> {
             occ: vec![0; n],
         });
         let pi = self.profiles.len() - 1;
-        // Stamp what is already routed for the new profile.
+        // Stamp the routed nets into the new profile.
         for r in routed {
             if r.paths.is_empty() {
                 continue;
@@ -473,7 +478,7 @@ impl<'a> Ctx<'a> {
         pi
     }
 
-    /// Cells a net's geometry `r` covers for victims of profile `pi`.
+    /// The cells that the geometry `r` of a net covers, for victims of profile `pi`.
     fn coverage(&self, r: &Routed, pi: usize) -> Vec<u32> {
         let g = &self.g;
         let victim = self.profiles[pi].p;
@@ -518,9 +523,9 @@ impl<'a> Ctx<'a> {
         cells
     }
 
-    /// Fill the coverage cache up to the current number of profiles. A
-    /// profile made after the net was stamped stamped it then with the same
-    /// coverage, so adding and removing stay symmetric.
+    /// Fill the coverage cache up to the current number of profiles. A profile
+    /// made after the net was stamped also stamped the net, with the same
+    /// coverage. Thus, add and remove stay symmetric.
     fn ensure_cov(&self, r: &mut Routed) {
         while r.cov.len() < self.profiles.len() {
             let pi = r.cov.len();
@@ -529,7 +534,7 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// Add (or remove) a net's geometry to every profile's occupancy.
+    /// Add the geometry of a net to the occupancy of all profiles (or remove it).
     fn stamp(&mut self, r: &mut Routed, add: bool) {
         self.ensure_cov(r);
         for pi in 0..self.profiles.len() {
@@ -563,7 +568,7 @@ impl<'a> Ctx<'a> {
             }
         }
         if out.is_empty() {
-            // Pad smaller than a cell: take the nearest cell.
+            // If the pad is smaller than a cell, use the nearest cell.
             let (cx, cy) = g.cell(prim.anchor());
             let cx = cx.clamp(0, g.nx as isize - 1) as usize;
             let cy = cy.clamp(0, g.ny as isize - 1) as usize;
@@ -582,7 +587,8 @@ impl<'a> Ctx<'a> {
 #[derive(Copy, Clone, PartialEq)]
 struct Node {
     f: f32,
-    /// Path cost when pushed; an entry whose cost was since lowered is stale.
+    /// The path cost when the entry was pushed. If the cost became lower after
+    /// that, the entry is stale.
     g: f32,
     idx: u32,
 }
@@ -600,7 +606,8 @@ impl PartialOrd for Node {
     }
 }
 
-/// Reusable A* buffers; `stamp_no` marks which entries are valid this search.
+/// A* buffers that are used again. `stamp_no` shows the entries that are
+/// valid in this search.
 struct Search {
     cost: Vec<f32>,
     came: Vec<u32>,
@@ -621,8 +628,8 @@ impl Search {
     }
 }
 
-/// How hard other nets' wires are: soft costs while negotiating, a wall
-/// in the final strict pass.
+/// How hard the wires of other nets are: soft costs during negotiation, and a
+/// wall in the last strict pass.
 #[derive(Clone, Copy)]
 enum Mode {
     Soft { pres: f32 },
@@ -637,7 +644,7 @@ struct Query<'q> {
     goals: &'q [Point],
     via_cost: f32,
     mode: Mode,
-    /// New vias of all nets so far: (point, drill radius).
+    /// The new vias of all nets until now: (point, drill radius).
     vias: &'q [(Point, f64)],
 }
 
@@ -670,7 +677,7 @@ fn astar(ctx: &Ctx, s: &mut Search, q: &Query) -> Option<Vec<usize>> {
         let o = st.owner[j];
         o == FREE || o == q.net
     };
-    // Extra cost of a cell for this net; None = not allowed.
+    // The extra cost of a cell for this net. None = the net cannot use the cell.
     let extra = |j: usize| -> Option<f32> {
         let occ = st.occ[j];
         match q.mode {
@@ -705,7 +712,7 @@ fn astar(ctx: &Ctx, s: &mut Search, q: &Query) -> Option<Vec<usize>> {
                 dx.max(dy) + (std::f32::consts::SQRT_2 - 1.0) * dx.min(dy)
             })
             .fold(f32::INFINITY, f32::min);
-        // Goal cells are pad centres; target cells can lie a little closer.
+        // Goal cells are pad centres. Target cells can be a little closer.
         (oct - 3.0).max(0.0)
             + if target_layers.contains(&l) {
                 0.0
@@ -772,7 +779,7 @@ fn astar(ctx: &Ctx, s: &mut Search, q: &Query) -> Option<Vec<usize>> {
                 continue;
             }
             if dx != 0 && dy != 0 {
-                // No squeezing diagonally between two obstacles.
+                // Do not go diagonally between two obstacles.
                 let a = g.idx(l, (ix + dx) as usize, iy as usize);
                 let b = g.idx(l, ix as usize, (iy + dy) as usize);
                 if (!free(a) && !is_target(s, a)) || (!free(b) && !is_target(s, b)) {
@@ -806,7 +813,7 @@ fn astar(ctx: &Ctx, s: &mut Search, q: &Query) -> Option<Vec<usize>> {
             for l2 in 0..g.nl {
                 let j = g.idx(l2, x as usize, y as usize);
                 let o = st.owner[j];
-                // Via copper may not reach other nets on any layer.
+                // Via copper must not touch other nets on any layer.
                 if !(o == FREE || o == q.net) {
                     ok = false;
                     break 'disk;
@@ -869,7 +876,8 @@ fn route_net(
 ) -> (Routed, Vec<(usize, String)>) {
     let mut r = Routed::default();
     let mut failed = Vec::new();
-    // Groups of pads already joined (by copper outside the router, or now).
+    // Groups of pads that are already connected (by copper from outside the
+    // router, or in this run).
     let mut group: HashMap<&str, usize> = HashMap::new();
     let mut cells_of: Vec<Vec<usize>> = Vec::new();
     let mut goals_of: Vec<Vec<Point>> = Vec::new();
@@ -888,7 +896,8 @@ fn route_net(
     }
     let normal = ctx.profile_for(&job.name, false);
     let narrow = ctx.profile_for(&job.name, true);
-    // Island cells near other nets' copper would start a track too close.
+    // Do not use island cells near the copper of other nets. A track that
+    // starts there is too close.
     let npi = ctx.statics(normal, all);
     for (label, &gi) in &group {
         if let Some(cells) = job.islands.get(*label) {
@@ -904,7 +913,7 @@ fn route_net(
     let mut vias: Vec<(Point, f64)> = other_vias.to_vec();
     for (ci, c) in job.conns.iter().enumerate() {
         let (Some(&ga), Some(&gb)) = (group.get(c.from.as_str()), group.get(c.to.as_str())) else {
-            failed.push((ci, "pad not found".to_string()));
+            failed.push((ci, "the pad was not found".to_string()));
             continue;
         };
         if ga == gb {
@@ -935,15 +944,15 @@ fn route_net(
             failed.push((
                 ci,
                 if Instant::now() > ctx.deadline {
-                    "time limit".to_string()
+                    "the time limit was reached".to_string()
                 } else {
-                    "no path found".to_string()
+                    "no path was found".to_string()
                 },
             ));
             continue;
         };
-        // A start cell that is already a target: the groups touch, so they
-        // merge without a wire.
+        // If a start cell is already a target, the groups touch. They merge
+        // without a wire.
         let wire = path.len() >= 2;
         let g = &ctx.g;
         for w in path.windows(2) {
@@ -953,14 +962,14 @@ fn route_net(
                 vias.push((g.at(cell), ctx.profiles[pi].p.drill_r));
             }
         }
-        // Merge the two groups; the new wire joins them.
+        // Merge the two groups. The new wire connects them.
         let (keep, gone) = (ga.min(gb), ga.max(gb));
         let moved = std::mem::take(&mut cells_of[gone]);
         cells_of[keep].extend(moved);
         cells_of[keep].extend(path.iter().copied());
         let moved = std::mem::take(&mut goals_of[gone]);
         goals_of[keep].extend(moved);
-        // Wire cells are targets too; a few of them guide the heuristic.
+        // Wire cells are also targets. Some of them guide the heuristic.
         goals_of[keep].extend(path.iter().step_by(8).map(|&c| g.at(c)));
         for v in group.values_mut() {
             if *v == gone {
@@ -975,8 +984,8 @@ fn route_net(
     (r, failed)
 }
 
-/// Cells where a stamped net's geometry sits on another net's: occupancy
-/// above the net's own share.
+/// Cells where the geometry of a stamped net is on the geometry of another
+/// net: the occupancy is more than the share of the net.
 fn in_conflict(ctx: &Ctx, r: &mut Routed) -> Vec<usize> {
     ctx.ensure_cov(r);
     let g = &ctx.g;
@@ -1008,9 +1017,9 @@ fn in_conflict(ctx: &Ctx, r: &mut Routed) -> Vec<usize> {
     bad
 }
 
-/// Route every unrouted connection that the options select. Connections
-/// that fail are repaired: the new wires around them are taken up and
-/// routed again together with them on a grid twice as fine.
+/// Route all unrouted connections that the options select. Then repair the
+/// connections that fail: rip up the new wires around them, and route all of
+/// them again on a grid with half the pitch.
 pub fn autoroute(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, String> {
     let start = Instant::now();
     let limit = opt.time_limit.unwrap_or(60.0).clamp(1.0, 3600.0);
@@ -1019,8 +1028,9 @@ pub fn autoroute(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, St
     if !out.failed.is_empty() && left() > 2.0 {
         repair(d, &mut out, opt, left())?;
     }
-    // New tracks cut pours into islands: route what the refilled pours now
-    // leave open, then repair what that cannot reach.
+    // New tracks cut pours into islands. Route the connections that the
+    // refilled pours leave open. Then repair the connections that this does
+    // not complete.
     for _ in 0..5 {
         if left() < 2.0 {
             break;
@@ -1079,7 +1089,7 @@ fn with_routes(d: &ProjectData, out: &RouteOutcome) -> ProjectData {
     d2
 }
 
-/// Where a pad label (`U1.3`) is on the board.
+/// The board position of a pad label (`U1.3`).
 fn pad_point(d: &ProjectData, label: &str) -> Option<Point> {
     let pr: PadRef = label.parse().ok()?;
     let part = d.parts.parts.get(&pr.part)?;
@@ -1091,9 +1101,9 @@ fn pad_point(d: &ProjectData, label: &str) -> Option<Point> {
         .map(|p| pl.transform(p.at))
 }
 
-/// Take up the new wires around the failed connections and route those nets
-/// again, together with the failed ones, on a grid twice as fine (unless a
-/// grid was given). The failures in `out` are replaced by what still fails.
+/// Rip up the new wires around the failed connections. Route those nets
+/// again, together with the failed nets, on a grid with half the pitch (if no
+/// grid was given). The failures that remain replace the failures in `out`.
 fn repair(
     d: &ProjectData,
     out: &mut RouteOutcome,
@@ -1156,7 +1166,7 @@ fn route_once(d: &ProjectData, opt: &RouteOptions) -> Result<RouteOutcome, Strin
     route_once_with(d, opt, None)
 }
 
-/// One routing run; `analysis` is the DRC analysis of `d` when the caller
+/// One router run. `analysis` is the DRC analysis of `d`, if the caller
 /// already has it.
 fn route_once_with(
     d: &ProjectData,
@@ -1179,7 +1189,7 @@ fn route_once_with(
         !opt.skip.contains(&e.net) && opt.nets.as_ref().is_none_or(|n| n.contains(&e.net))
     });
 
-    // Jobs per net, with each pad's cells.
+    // One job for each net, with the cells of each pad.
     let layers = d.board.stackup.copper_layers;
     let mut jobs: BTreeMap<String, NetJob> = BTreeMap::new();
     for e in &edges {
@@ -1200,8 +1210,9 @@ fn route_once_with(
             to: e.to.clone(),
         });
     }
-    // Copper already joined to a pad (pads, tracks, vias, pour pieces) is
-    // part of it for routing: a connection may start or end anywhere on it.
+    // For the router, copper that is already connected to a pad (pads, tracks,
+    // vias, pour pieces) is part of the pad. A connection can start or end at
+    // any point on it.
     let copper = &analysis.geometry.copper;
     let pad_island: HashMap<(&str, &str), usize> = copper
         .iter()
@@ -1280,8 +1291,9 @@ fn route_once_with(
             }
         }
     }
-    // Short nets first; nets with a pour last, since the pour joins most of
-    // their pads and only what it leaves open is in the ratsnest.
+    // Route short nets first and nets with a pour last. The pour connects most
+    // of their pads, and only the connections that it leaves open are in the
+    // ratsnest.
     let poured: BTreeSet<&str> = d
         .routing
         .zones
@@ -1349,7 +1361,7 @@ fn route_once_with(
             routed[ni] = r;
             failures.insert(name.clone(), failed);
         }
-        // Which nets still overlap another?
+        // Find the nets that still overlap another net.
         let mut conflicted = Vec::new();
         for name in &order {
             let ni = jobs[name].id as usize;
@@ -1369,14 +1381,15 @@ fn route_once_with(
             break;
         }
         todo = conflicted;
-        // Capped: past this the soft costs are as good as walls anyway.
+        // Limit the value. Above this value, the soft costs are almost the same
+        // as walls.
         pres = (pres * 1.6).min(1000.0);
     }
 
     if dbg {
         eprintln!("negotiated {:?}, {} left", t0.elapsed(), todo.len());
     }
-    // Still overlapping: route those nets strictly around the rest.
+    // Route the nets that still overlap strictly around the other nets.
     for name in &todo {
         let job = &jobs[name];
         let ni = job.id as usize;
@@ -1399,7 +1412,8 @@ fn route_once_with(
         failures.insert(name.clone(), failed);
     }
 
-    // Straighten, net by net, against the final geometry of the others.
+    // Straighten the paths of each net, against the final geometry of the
+    // other nets.
     let mut out = RouteOutcome {
         passes: used,
         ..Default::default()
@@ -1448,14 +1462,14 @@ fn route_once_with(
                     return false;
                 }
                 let steps = dx.abs().max(dy.abs());
-                // The ends are path cells already; check what lies between.
+                // The ends are already path cells. Check the cells between them.
                 (1..steps).all(|t| {
                     let x = ax + if steps == 0 { 0 } else { dx * t / steps };
                     let y = ay + if steps == 0 { 0 } else { dy * t / steps };
                     ok(g.idx(l, x as usize, y as usize))
                 })
             };
-            // Per-layer runs, each straightened.
+            // Runs on each layer. Straighten each run.
             let mut runs: Vec<Vec<usize>> = Vec::new();
             for &c in path {
                 match runs.last_mut() {
@@ -1497,7 +1511,7 @@ fn route_once_with(
                     }
                 }
                 pts.dedup_by(|a, b| a.dist(*b) < 1e-9);
-                // Expand kept vertices back into a cell chain for stamping.
+                // Change the kept vertices back into a cell chain, to stamp it.
                 for w in keep.windows(2) {
                     let (ra, rb) = (w[0] % g.plane(), w[1] % g.plane());
                     let (ax, ay) = ((ra % g.nx) as isize, (ra / g.nx) as isize);

@@ -101,11 +101,11 @@ pub struct Gpu3D {
     mesh_count: u32,
     /// Board and parts extent: (min, max).
     pub bounds: ([f32; 3], [f32; 3]),
-    /// Per-instance load problems (refdes, message).
+    /// The load problems of each instance (refdes, message).
     pub problems: Vec<(String, String)>,
 }
 
-/// Orbit camera around a target point; Z is up.
+/// An orbit camera around a target point. Z is up.
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {
     pub target: [f32; 3],
@@ -146,14 +146,13 @@ impl Camera {
         ) * view
     }
 
-    /// Frame a box from a pleasant three-quarter view.
-    /// Fit a box in a square view.
+    /// Fit a box in a square view, seen from a three-quarter angle.
     pub fn frame(lo: [f32; 3], hi: [f32; 3]) -> Camera {
         Camera::frame_aspect(lo, hi, 1.0)
     }
 
-    /// Fit a box in a view of `aspect` = width / height: a tall view is
-    /// limited by its narrower horizontal field.
+    /// Fit a box in a view with `aspect` = width / height. In a tall view, the
+    /// narrower horizontal field is the limit.
     pub fn frame_aspect(lo: [f32; 3], hi: [f32; 3], aspect: f32) -> Camera {
         let c = [
             (lo[0] + hi[0]) / 2.0,
@@ -176,7 +175,7 @@ impl Camera {
     }
 }
 
-/// Mesh files loaded once per path.
+/// Mesh files, loaded one time for each path.
 #[derive(Default)]
 pub struct MeshCache {
     meshes: HashMap<PathBuf, Result<Arc<Mesh>, String>>,
@@ -216,7 +215,7 @@ impl Gpu {
                 ..Default::default()
             }))
         })
-        .map_err(|e| format!("no GPU adapter: {e}"))?;
+        .map_err(|e| format!("no GPU adapter was found: {e}"))?;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("lamina"),
             required_features: wgpu::Features::empty(),
@@ -225,7 +224,7 @@ impl Gpu {
             memory_hints: wgpu::MemoryHints::MemoryUsage,
             trace: wgpu::Trace::Off,
         }))
-        .map_err(|e| format!("GPU device: {e}"))?;
+        .map_err(|e| format!("cannot get a GPU device: {e}"))?;
         Ok(Gpu::new(device, queue))
     }
 
@@ -476,8 +475,8 @@ impl Gpu {
         }
     }
 
-    /// Upload 2D layers. Each layer gets its own depth so overlaps inside a
-    /// layer blend once.
+    /// Upload 2D layers. Each layer gets its own depth, so that overlaps in a
+    /// layer blend one time.
     pub fn upload_2d(&self, s: &Scene2D, px_per_mm: f64, active_copper: u8) -> Gpu2D {
         let mut verts: Vec<V2> = Vec::new();
         let mut idx: Vec<u32> = Vec::new();
@@ -485,15 +484,15 @@ impl Gpu {
         let n = s.layers.len().max(1) as f32;
         for (li, l) in s.layers.iter().enumerate() {
             let base_color = rgba_lin(theme::layer_color(l.layer, s.copper_layers));
-            // Copper away from the active layer recedes.
+            // Copper that is not on the active layer is dimmer.
             let layer_k = match l.layer {
                 SceneLayer::Copper(i) if i != active_copper => 0.38,
                 _ => 1.0,
             };
             let depth = 0.9 - 0.8 * (li as f32 / n);
             let start = idx.len() as u32;
-            // Pours draw in their own depth slot just below the layer's
-            // pads and tracks, and lighter.
+            // Pours have their own depth slot, just below the pads and tracks
+            // of the layer. They are also lighter.
             for (part, items, k) in [(0, &l.items[..l.pour], 0.26), (1, &l.items[l.pour..], 1.0)] {
                 let mut tris = Tris::default();
                 for g in items {
@@ -555,7 +554,7 @@ impl Gpu {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        // tiny-skia stores premultiplied alpha; the board is opaque inside its outline.
+        // tiny-skia keeps premultiplied alpha. The board is opaque in its outline.
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &tex,
@@ -574,7 +573,7 @@ impl Gpu {
         tex.create_view(&Default::default())
     }
 
-    /// Upload the board slab with its surface textures, and every part mesh.
+    /// Upload the board slab with its surface textures, and all part meshes.
     pub fn upload_3d(&self, s3: &Scene3D, s2: &Scene2D, cache: &mut MeshCache) -> Gpu3D {
         let bb = s3.bbox;
         let (vb, ib) = board_slab(&s3.outline, &s3.holes, s3.thickness, bb);
@@ -731,8 +730,8 @@ impl Gpu {
         }
     }
 
-    /// Draw 2D layers. `center` and `px_per_mm` set the view; `visible`
-    /// filters layers.
+    /// Draw 2D layers. `center` and `px_per_mm` set the view. `visible`
+    /// filters the layers.
     pub fn draw_2d(
         &self,
         t: &Target,
@@ -771,7 +770,7 @@ impl Gpu {
             .to_cols_array_2d();
         let e = cam.eye();
         u.eye = [e.x, e.y, e.z, 1.0];
-        // Light from the side the camera is on, so the bottom is not in shadow.
+        // Put the light on the side of the camera, so that the bottom is not in shadow.
         u.params[0] = if e.z < cam.target[2] { -1.0 } else { 1.0 };
         u.bg_top = [0.085, 0.095, 0.120, 1.0];
         u.bg_bot = [0.012, 0.013, 0.017, 1.0];
@@ -874,13 +873,13 @@ impl Gpu {
         });
         self.device
             .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| format!("GPU poll: {e}"))?;
+            .map_err(|e| format!("the GPU poll failed: {e}"))?;
         rx.recv()
             .map_err(|e| e.to_string())?
-            .map_err(|e| format!("GPU readback: {e}"))?;
+            .map_err(|e| format!("the GPU readback failed: {e}"))?;
         let data = slice
             .get_mapped_range()
-            .map_err(|e| format!("GPU readback: {e}"))?;
+            .map_err(|e| format!("the GPU readback failed: {e}"))?;
         let mut out = Vec::with_capacity((row * t.height) as usize);
         for y in 0..t.height {
             let s = (y * padded) as usize;

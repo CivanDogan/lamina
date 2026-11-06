@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "KiCad footprint and board file import and export"
+description = "Import and export of KiCad footprint and board files"
 
 [dependencies]
 lamina-model.workspace = true

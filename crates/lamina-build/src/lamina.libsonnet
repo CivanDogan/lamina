@@ -2,14 +2,14 @@
 //
 //   local lamina = import 'lamina.libsonnet';
 //
-// A design source evaluates to an object with any of the keys `board`,
-// `parts` and `nets`. A fragment is the same shape; blocks are functions
-// that return fragments, and `merge` joins them.
+// A design source evaluates to an object with one or more of the keys
+// `board`, `parts` and `nets`. A fragment has the same shape. Blocks are
+// functions that return fragments. `merge` joins the fragments.
 {
   local lamina = self,
 
-  // Join fragments. Every part must have a unique refdes. Nets with the
-  // same name join their pads. Other fields: later fragments win.
+  // Join fragments. Each part must have a unique refdes. Nets with the
+  // same name join their pads. For other fields, the later fragment wins.
   merge(fragments)::
     std.foldl(function(acc, f) lamina.merge2(acc, f), fragments, {}),
 
@@ -21,7 +21,7 @@
     local an = std.get(a, 'nets', {});
     local bn = std.get(b, 'nets', {});
     local dup = [r for r in std.objectFields(bp) if std.objectHas(ap, r)];
-    assert std.length(dup) == 0 : 'parts defined twice: ' + std.join(', ', dup);
+    assert std.length(dup) == 0 : 'more than one fragment has these parts: ' + std.join(', ', dup);
     local nets = an + {
       [n]: (
         if std.objectHas(an, n)
@@ -34,8 +34,9 @@
     + (if hasParts then { parts: ap + bp } else {})
     + (if hasNets then { nets: nets } else {}),
 
-  // Put every part of a fragment in a group: one instance of a block.
-  // Groups of the same block can copy each other's layout (repeat_layout).
+  // Put each part of a fragment in a group. A group is one instance of a
+  // block. Groups of the same block can copy their layout to each other
+  // (repeat_layout).
   group(name, fragment)::
     fragment + (
       if std.objectHas(fragment, 'parts') then {
@@ -43,14 +44,15 @@
       } else {}
     ),
 
-  // A net from pad references such as 'R1.1'.
+  // Make a net from pad references, for example 'R1.1'.
   net(pads, class=null)::
     { pads: pads } + (if class == null then {} else { class: class }),
 
   // Pad references of one part: pads('R1', [1, 2]) == ['R1.1', 'R1.2'].
   pads(refdes, numbers):: [refdes + '.' + std.toString(n) for n in numbers],
 
-  // Rectangle outline, lower-left corner at (x, y), optional corner radius.
+  // A rectangular outline with its lower-left corner at (x, y) and an
+  // optional corner radius.
   rect(w, h, r=0, x=0, y=0)::
     if r <= 0 then {
       vertices: [
@@ -76,7 +78,8 @@
   // A round mechanical hole.
   hole(id, x, y, d):: { id: id, at: { x: x, y: y }, drill: { type: 'round', diameter: d } },
 
-  // Four mounting holes inset from the corners of a w by h board.
+  // Four mounting holes, at the distance `inset` from the corners of a
+  // w by h board.
   corner_holes(w, h, d, inset, x=0, y=0):: [
     lamina.hole('h1', x + inset, y + inset, d),
     lamina.hole('h2', x + w - inset, y + inset, d),

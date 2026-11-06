@@ -1,4 +1,4 @@
-//! EasyEDA "standard" footprint format to Lamina footprints.
+//! Converts EasyEDA "standard" footprints to Lamina footprints.
 //!
 //! Units are 10 mil (0.254 mm), Y points down, and coordinates are relative
 //! to `dataStr.head.x/y`.
@@ -21,23 +21,23 @@ pub struct PartMeta {
     pub manufacturer: Option<String>,
     pub package: Option<String>,
     pub description: Option<String>,
-    /// JLCPCB basic part (no extended-part fee).
+    /// True for a JLCPCB basic part (no extended-part fee).
     pub basic: Option<bool>,
     pub datasheet: Option<String>,
     pub stock: Option<u64>,
     pub price: Option<f64>,
 }
 
-/// Where the EasyEDA 3D model sits, before reading the mesh.
+/// The position of the EasyEDA 3D model, before Lamina reads the mesh.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub uuid: String,
     pub title: String,
-    /// EasyEDA rotation in degrees (x, y, z), as stored.
+    /// The EasyEDA rotation in degrees (x, y, z), as stored.
     pub rotation: [f64; 3],
-    /// EasyEDA z offset in mm.
+    /// The EasyEDA z offset in mm.
     pub z: f64,
-    /// Centre of the model's top-view outline in footprint coordinates.
+    /// The centre of the top-view outline of the model, in footprint coordinates.
     pub outline_center: Option<Point>,
 }
 
@@ -46,7 +46,7 @@ pub struct Imported {
     pub footprint: Footprint,
     pub model: Option<ModelInfo>,
     pub meta: PartMeta,
-    /// Things skipped or approximated during conversion.
+    /// The items that the conversion skipped or made approximate.
     pub notes: Vec<String>,
 }
 
@@ -88,8 +88,8 @@ pub(crate) fn points(ctx: &Ctx, text: &str) -> Vec<Point> {
         .collect()
 }
 
-/// Parse an SVG path of M, L, Z and A commands into points (arcs flattened
-/// to their end point, which is enough for outlines).
+/// Parse an SVG path of M, L, Z and A commands into points. An arc becomes
+/// only its end point. This is enough for outlines.
 pub(crate) fn path_points(ctx: &Ctx, path: &str) -> Vec<Point> {
     let mut out = Vec::new();
     let mut tok = String::new();
@@ -146,7 +146,7 @@ pub(crate) fn path_points(ctx: &Ctx, path: &str) -> Vec<Point> {
     out
 }
 
-/// SVG arc `M x0 y0 A r r 0 large sweep x1 y1` to a Lamina arc.
+/// Convert an SVG arc `M x0 y0 A r r 0 large sweep x1 y1` to a Lamina arc.
 pub(crate) fn svg_arc(ctx: &Ctx, path: &str) -> Option<Shape> {
     let cleaned = path.replace(['M', 'A', 'm', 'a'], " ");
     let v = nums(&cleaned);
@@ -158,7 +158,7 @@ pub(crate) fn svg_arc(ctx: &Ctx, path: &str) -> Option<Shape> {
     let large = v[5] != 0.0;
     let sweep = v[6] != 0.0;
     let p1 = ctx.pt(v[7], v[8]);
-    // Y is flipped, so SVG's positive sweep becomes clockwise.
+    // Y is flipped, so a positive SVG sweep becomes clockwise.
     let ccw = !sweep;
     let m = Point::new((p0.x + p1.x) / 2.0, (p0.y + p1.y) / 2.0);
     let dx = p1.x - p0.x;
@@ -200,7 +200,7 @@ fn str_field(v: &Value, path: &[&str]) -> Option<String> {
     }
 }
 
-/// Footprint id from the EasyEDA package title.
+/// Make a footprint id from the EasyEDA package title.
 pub fn footprint_id(title: &str) -> String {
     let mut id: String = title
         .chars()
@@ -229,7 +229,7 @@ pub fn convert(resp: &Value, lcsc: &str, fetched: &str) -> Result<Imported, Stri
     let r = resp.get("result").unwrap_or(resp);
     let pkg = r
         .get("packageDetail")
-        .ok_or("component has no packageDetail (no footprint)")?;
+        .ok_or("the component has no packageDetail (no footprint)")?;
     let ds = pkg.get("dataStr").ok_or("packageDetail has no dataStr")?;
     let head = ds.get("head").ok_or("dataStr has no head")?;
     let num = |v: Option<&Value>| -> f64 {
@@ -272,7 +272,7 @@ pub fn convert(resp: &Value, lcsc: &str, fetched: &str) -> Result<Imported, Stri
             "PAD" => match pad(&ctx, &fields) {
                 Ok(Some(p)) => fp.pads.push(p),
                 Ok(None) => *skipped.entry("bottom-side PAD".into()).or_default() += 1,
-                Err(e) => notes.push(format!("pad skipped: {e}")),
+                Err(e) => notes.push(format!("skipped a pad: {e}")),
             },
             "HOLE" => {
                 let d = r6(f(&fields, 3) * 2.0 * U);
@@ -322,7 +322,7 @@ pub fn convert(resp: &Value, lcsc: &str, fetched: &str) -> Result<Imported, Stri
                 if radius <= 0.0 {
                     continue;
                 }
-                // Tiny circles on the marking layer are polarity dots.
+                // Small circles on the marking layer are polarity dots.
                 let filled = radius < 0.2 && w >= radius;
                 fp.graphics.push(FpGraphic {
                     layer,
@@ -383,10 +383,10 @@ pub fn convert(resp: &Value, lcsc: &str, fetched: &str) -> Result<Imported, Stri
         notes.push(format!("skipped {n} {k} record(s)"));
     }
     if fp.pads.is_empty() {
-        return Err(format!("{lcsc}: footprint has no pads"));
+        return Err(format!("{lcsc}: the footprint has no pads"));
     }
 
-    // Courtyard from pads and body, 0.25 mm excess, on a 0.05 mm grid.
+    // Make the courtyard from the pads and the body, 0.25 mm larger, on a 0.05 mm grid.
     let mut bb = fp.pads_bbox().unwrap();
     if let Some(b) = Rect::from_points(body_pts.iter().copied()) {
         bb = bb.union(&b);
@@ -468,7 +468,7 @@ pub fn convert(resp: &Value, lcsc: &str, fetched: &str) -> Result<Imported, Stri
     })
 }
 
-/// A pad with the side it sits on (`None` for through pads) and its net.
+/// A pad, its side (`None` for through pads) and its net.
 pub(crate) struct RawPad {
     pub pad: Pad,
     pub side: Option<Side>,
@@ -524,7 +524,7 @@ pub(crate) fn pad_any(ctx: &Ctx, fl: &[&str]) -> Result<RawPad, String> {
                 .map(|p| Point::new(r6(p.x - at.x), r6(p.y - at.y)))
                 .collect();
             if pts.len() < 3 {
-                return Err(format!("polygon pad {number} has too few points"));
+                return Err(format!("the polygon pad {number} has too few points"));
             }
             rotation = 0.0;
             PadShape::Polygon { points: pts }
@@ -542,7 +542,7 @@ pub(crate) fn pad_any(ctx: &Ctx, fl: &[&str]) -> Result<RawPad, String> {
         "11" => {
             let d = r6(hole_r * 2.0 * U);
             if d <= 0.0 {
-                return Err(format!("through pad {number} has no hole"));
+                return Err(format!("the through pad {number} has no hole"));
             }
             let drill = if hole_len > 0.0 {
                 let l = r6(hole_len * U);
@@ -563,7 +563,11 @@ pub(crate) fn pad_any(ctx: &Ctx, fl: &[&str]) -> Result<RawPad, String> {
             };
             PadKind::Through { drill, plated }
         }
-        other => return Err(format!("pad {number} on unsupported layer {other}")),
+        other => {
+            return Err(format!(
+                "pad {number} is on layer {other}, which is not supported"
+            ));
+        }
     };
     let smd = matches!(kind, PadKind::Smd);
     Ok(RawPad {
@@ -608,7 +612,7 @@ pub(crate) fn model_info(ctx: &Ctx, json_text: &str) -> Option<ModelInfo> {
                 .or(t.as_f64())
         })
         .unwrap_or(0.0);
-    // Outline polylines give the model's true top-view position.
+    // The outline polylines give the true top-view position of the model.
     let mut pts = Vec::new();
     if let Some(children) = v.get("childNodes").and_then(|c| c.as_array()) {
         for c in children {
@@ -694,13 +698,13 @@ pub fn obj_bounds(obj: &str) -> Option<([f64; 3], [f64; 3])> {
     any.then_some((lo, hi))
 }
 
-/// Place an EasyEDA OBJ mesh: rotate it, then move its top-view centre to
-/// the outline centre and its base to the board surface plus the z offset.
+/// Place an EasyEDA OBJ mesh. Rotate it, then move its top-view centre to
+/// the outline centre. Move its base to the board surface plus the z offset.
 pub fn model_ref(info: &ModelInfo, obj: &str, file: String) -> ModelRef {
     let rotation = lamina_rotation(info.rotation);
     let m = rotation_matrix(rotation);
     let (lo, hi) = obj_bounds(obj).unwrap_or(([0.0; 3], [0.0; 3]));
-    // Rotated bounding box from the 8 corners.
+    // Get the rotated bounding box from the 8 corners.
     let mut rlo = [f64::INFINITY; 3];
     let mut rhi = [f64::NEG_INFINITY; 3];
     for i in 0..8 {
@@ -718,7 +722,7 @@ pub fn model_ref(info: &ModelInfo, obj: &str, file: String) -> ModelRef {
     let center = info.outline_center.unwrap_or(Point::new(0.0, 0.0));
     let cx = (rlo[0] + rhi[0]) / 2.0;
     let cy = (rlo[1] + rhi[1]) / 2.0;
-    // Models that sit far below the board after rotation are lifted onto it.
+    // If a model is far below the board after rotation, lift it onto the board.
     let lift = if rlo[2] < -0.3 { -rlo[2] } else { 0.0 };
     ModelRef {
         file,
@@ -728,7 +732,7 @@ pub fn model_ref(info: &ModelInfo, obj: &str, file: String) -> ModelRef {
     }
 }
 
-/// Height of the placed model above the board.
+/// The height of the placed model above the board.
 pub fn model_height(info: &ModelInfo, obj: &str) -> Option<f64> {
     let m = rotation_matrix(lamina_rotation(info.rotation));
     let (lo, hi) = obj_bounds(obj)?;

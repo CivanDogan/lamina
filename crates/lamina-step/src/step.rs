@@ -1,5 +1,5 @@
-//! STEP B-rep to triangles: assembly transforms, colours, surface
-//! tessellation in parameter space.
+//! Converts a STEP B-rep to triangles. It applies assembly transforms and
+//! colours, and tessellates surfaces in parameter space.
 
 use std::collections::HashMap;
 
@@ -374,7 +374,7 @@ impl Surface {
         let dv = sub(self.eval(u, v + h), self.eval(u, v - h));
         let n = cross(du, dv);
         if len(n) < 1e-14 {
-            // Degenerate point (pole): step inward a little.
+            // At a degenerate point (a pole), move a small distance inward.
             let du = sub(
                 self.eval(u + 10.0 * h, v + 10.0 * h),
                 self.eval(u - 10.0 * h, v + 10.0 * h),
@@ -395,9 +395,8 @@ impl Surface {
         }
     }
 
-    /// Parameters of a point on the surface. `u` angles are unwrapped by
-    /// the caller.
-    /// Parameters of a point, starting the search from `hint` when given.
+    /// The parameters of a point on the surface. The caller unwraps the `u`
+    /// angles. If `hint` is given, the search starts from it.
     fn uv_near(&self, p: V3, hint: Option<(f64, f64)>) -> (f64, f64) {
         if let (Surface::Spline(s), Some(h)) = (self, hint) {
             let (u0, u1, v0, v1) = s.range();
@@ -436,7 +435,7 @@ impl Surface {
                 invert_grid(|u, v| s.eval(u, v), u0, u1, v0, v1, p)
             }
             Surface::Revolution(c, o, ax) => {
-                // Profile parameter from radial distance and height.
+                // Get the profile parameter from the radial distance and the height.
                 let d = sub(p, *o);
                 let h = dot(d, *ax);
                 let rho = len(sub(d, mul(*ax, h)));
@@ -455,7 +454,7 @@ impl Surface {
                     t1,
                     [rho, h, 0.0],
                 );
-                // Angle between the profile point and p around the axis.
+                // The angle around the axis between the profile point and p.
                 let q = c.eval(t);
                 let a = radial(sub(q, *o), *ax);
                 let b = radial(d, *ax);
@@ -481,7 +480,7 @@ impl Surface {
         }
     }
 
-    /// Which parameters are angles (periodic with 2π).
+    /// Shows which parameters are angles (periodic with 2π).
     fn periodic(&self) -> (bool, bool) {
         match self {
             Surface::Cylinder(..)
@@ -494,7 +493,7 @@ impl Surface {
         }
     }
 
-    /// Ruled or flat surfaces need no interior refinement.
+    /// Ruled or flat surfaces do not need interior refinement.
     fn flat_in_v(&self) -> bool {
         matches!(self, Surface::Plane(_))
     }
@@ -880,8 +879,8 @@ trait Angle {
 }
 impl Angle for f64 {
     fn to_radians_if_degrees(self) -> f64 {
-        // Files store plane angles in the unit of the context; radians
-        // unless the value is clearly in degrees.
+        // Files store plane angles in the unit of the context. Use radians,
+        // but if the value is clearly in degrees, convert it.
         if self.abs() > TAU {
             self.to_radians()
         } else {
@@ -890,7 +889,7 @@ impl Angle for f64 {
     }
 }
 
-/// Discretize one edge from its start vertex to its end vertex.
+/// Divide one edge into points, from its start vertex to its end vertex.
 fn edge_points(m: &Model, curve: &Curve, a: V3, b: V3, same_sense: bool, tol: f64) -> Vec<V3> {
     let closed = dist(a, b) < 1e-7;
     match curve {
@@ -954,7 +953,7 @@ struct Ctx<'a> {
 }
 
 impl<'a> Ctx<'a> {
-    /// Points of an EDGE_CURVE in its own direction (cached).
+    /// The points of an EDGE_CURVE in its own direction. The result is cached.
     fn edge(&mut self, id: u32) -> Option<Vec<V3>> {
         if let Some(v) = self.edges.get(&id) {
             return Some(v.clone());
@@ -1071,7 +1070,7 @@ impl<'a> Ctx<'a> {
 
 type Tri = ([V3; 3], [V3; 3]);
 
-/// Triangulate a polygon with holes given in 2D, returning index triples.
+/// Triangulate a 2D polygon with holes. Returns index triples.
 fn earcut2(rings: &[Vec<[f64; 2]>]) -> Option<(Vec<[f64; 2]>, Vec<usize>)> {
     let mut coords = Vec::new();
     let mut holes = Vec::new();
@@ -1094,7 +1093,7 @@ fn earcut2(rings: &[Vec<[f64; 2]>]) -> Option<(Vec<[f64; 2]>, Vec<usize>)> {
 
 fn tessellate(s: &Surface, loops: &[Vec<V3>], tol: f64) -> Option<Vec<Tri>> {
     let (pu, pv) = s.periodic();
-    // Map loops to parameter space, unwrapping periodic coordinates.
+    // Map the loops to parameter space, and unwrap periodic coordinates.
     let mut uv_loops: Vec<Vec<[f64; 2]>> = Vec::new();
     for l in loops {
         let mut out: Vec<[f64; 2]> = Vec::with_capacity(l.len());
@@ -1123,14 +1122,15 @@ fn tessellate(s: &Surface, loops: &[Vec<V3>], tol: f64) -> Option<Vec<Tri>> {
         }
         uv_loops.push(out);
     }
-    // A loop around a periodic surface that does not close in u (no seam
-    // edge, e.g. a full cylinder band) cannot be triangulated in uv.
+    // If a loop goes around a periodic surface and does not close in u, it
+    // cannot be triangulated in uv. An example is a full cylinder band with no
+    // seam edge.
     for l in &uv_loops {
         if pu && (l[0][0] - l[l.len() - 1][0]).abs() > 1.0 {
             return None;
         }
     }
-    // Shift inner loops by whole periods to sit inside the outer one.
+    // Move the inner loops by whole periods into the outer loop.
     if pu && uv_loops.len() > 1 {
         let (lo, hi) = uv_loops[0]
             .iter()
@@ -1151,7 +1151,7 @@ fn tessellate(s: &Surface, loops: &[Vec<V3>], tol: f64) -> Option<Vec<Tri>> {
             }
         }
     }
-    // Scale u by a radius so earcut sees sensible proportions.
+    // Multiply u by a radius, so that earcut gets correct proportions.
     let ku = match s {
         Surface::Cylinder(_, r) | Surface::Sphere(_, r) | Surface::Cone(_, r, _) => r.max(0.1),
         Surface::Torus(_, big, _) => big.max(0.1),
@@ -1163,7 +1163,7 @@ fn tessellate(s: &Surface, loops: &[Vec<V3>], tol: f64) -> Option<Vec<Tri>> {
         .collect();
     let (pts, idx) = earcut2(&scaled)?;
     let uv: Vec<[f64; 2]> = pts.iter().map(|p| [p[0] / ku, p[1]]).collect();
-    // Boundary edges are never split, so neighbouring faces stay joined.
+    // Do not split boundary edges. Then adjacent faces stay joined.
     let mut boundary = std::collections::HashSet::new();
     let mut base = 0;
     for l in &uv_loops {
@@ -1182,7 +1182,7 @@ fn tessellate(s: &Surface, loops: &[Vec<V3>], tol: f64) -> Option<Vec<Tri>> {
             let mut next = Vec::with_capacity(tris.len() * 2);
             let mut changed = false;
             for t in tris {
-                // Split the worst edge if it deviates from the surface.
+                // Split the edge with the largest error, if it is more than tol from the surface.
                 let mut worst = None;
                 let mut worst_err = tol;
                 for k in 0..3 {
@@ -1232,7 +1232,7 @@ fn tessellate(s: &Surface, loops: &[Vec<V3>], tol: f64) -> Option<Vec<Tri>> {
     }
     let p3: Vec<V3> = verts.iter().map(|p| s.eval(p[0], p[1])).collect();
     let n3: Vec<V3> = verts.iter().map(|p| s.normal(p[0], p[1])).collect();
-    // Check the parameter mapping: boundary points must land where they were.
+    // Check the parameter mapping. Boundary points must go back to their initial positions.
     let mut k = 0;
     for l in loops {
         for p in l {
@@ -1257,7 +1257,7 @@ fn tessellate(s: &Surface, loops: &[Vec<V3>], tol: f64) -> Option<Vec<Tri>> {
     Some(out)
 }
 
-/// Project loops on their best-fit plane and triangulate there.
+/// Project the loops on their best-fit plane and triangulate them there.
 fn planar_fallback(loops: &[Vec<V3>]) -> Option<Vec<Tri>> {
     let outer = &loops[0];
     let mut n = [0.0; 3];
@@ -1328,7 +1328,7 @@ fn length_scale(e: &HashMap<u32, Entity>) -> f64 {
     1.0
 }
 
-/// Colour assigned by STYLED_ITEM chains: item id -> linear RGB.
+/// The colours that STYLED_ITEM chains give: item id -> linear RGB.
 fn colors(e: &HashMap<u32, Entity>) -> HashMap<u32, [f32; 3]> {
     fn find_rgb(e: &HashMap<u32, Entity>, a: &Arg, depth: usize) -> Option<[f32; 3]> {
         if depth > 12 {
@@ -1393,7 +1393,7 @@ fn placement_xf(m: &Model, id: u32) -> Xf {
 /// Load a STEP file into a mesh.
 pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
     if !bytes.starts_with(b"ISO-10303-21") {
-        return Err("not a STEP file".into());
+        return Err("this is not a STEP file".into());
     }
     let e = parse(bytes)?;
     let scale = length_scale(&e);
@@ -1406,11 +1406,11 @@ pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
         skipped: 0,
     };
 
-    // Representation graph: groups of reps linked without transform, and
-    // child -> parent links with a transform.
+    // The representation graph: groups of reps that are linked without a
+    // transform, and child -> parent links with a transform.
     let mut ids: Vec<u32> = e.keys().copied().collect();
     ids.sort_unstable();
-    // Shape representations, not styling or relationship records.
+    // Only shape representations. Not style or relationship records.
     let is_rep = |k: &str| {
         k.ends_with("REPRESENTATION")
             && !k.contains("RELATIONSHIP")
@@ -1418,9 +1418,9 @@ pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
             && !k.starts_with("DRAUGHTING")
             && k != "CONTEXT_DEPENDENT_SHAPE_REPRESENTATION"
     };
-    // Which side of each transform relationship is the child, from the
-    // product structure: CDSR -> NAUO (parent, child product definitions)
-    // and SHAPE_DEFINITION_REPRESENTATION (product definition -> rep).
+    // Find which side of each transform relationship is the child. The
+    // product structure gives this: CDSR -> NAUO (parent, child product
+    // definitions) and SHAPE_DEFINITION_REPRESENTATION (product definition -> rep).
     let mut pd_rep: HashMap<u32, u32> = HashMap::new();
     for ent in e.values() {
         if ent.kind() == "SHAPE_DEFINITION_REPRESENTATION" {
@@ -1505,8 +1505,8 @@ pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
                     .and_then(|x| x.id())
                     .map(|i| placement_xf(&ctx.m, i))
                     .unwrap_or_else(Xf::id);
-                // Default: rep_1 is placed into rep_2, unless the product
-                // structure says rep_2 is the child.
+                // By default, rep_1 goes into rep_2. But if the product
+                // structure shows that rep_2 is the child, rep_2 goes into rep_1.
                 if child_rep_of.get(id) == Some(&r2) {
                     links.push((r2, r1, t1.then(&t2.inverse())));
                 } else {
@@ -1527,7 +1527,7 @@ pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
             group.insert(x, y);
         }
     }
-    // Mapped items place one representation inside another.
+    // A mapped item puts one representation in another.
     for id in &ids {
         let ent = &e[id];
         if !is_rep(ent.kind()) {
@@ -1614,7 +1614,7 @@ pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
         );
     }
     if emitted == 0 {
-        // No usable representation graph: take every solid as is.
+        // There is no usable representation graph. Use each solid as it is.
         for id in &ids {
             emit_solid(&mut ctx, *id, &Xf::id(), &mut parts);
         }
@@ -1629,7 +1629,7 @@ pub fn load(bytes: &[u8]) -> Result<Mesh, String> {
         .sort_by_key(|p| std::cmp::Reverse(p.positions.len()));
     if mesh.parts.is_empty() {
         return Err(format!(
-            "no tessellatable geometry ({} faces failed)",
+            "the file has no geometry that can be tessellated ({} faces failed)",
             ctx.skipped
         ));
     }
@@ -1640,7 +1640,7 @@ fn key(c: [f32; 3]) -> [u32; 3] {
     [c[0].to_bits(), c[1].to_bits(), c[2].to_bits()]
 }
 
-/// Tessellate a solid or shell item. Returns 1 when something was emitted.
+/// Tessellate a solid or shell item. Returns 1 if it wrote one or more faces.
 fn emit_solid(ctx: &mut Ctx, id: u32, xf: &Xf, parts: &mut HashMap<[u32; 3], MeshPart>) -> usize {
     let Some(ent) = ctx.m.get(id) else { return 0 };
     let shells: Vec<u32> = match ent.kind() {
@@ -1722,8 +1722,8 @@ mod tests {
 
     #[test]
     fn assembly_placement_parent_first() {
-        // SolidWorks order: rep_1 is the parent, rep_2 the child; the
-        // product structure (NAUO) says which is which.
+        // The SolidWorks order: rep_1 is the parent and rep_2 is the child.
+        // The product structure (NAUO) shows which is which.
         let asm = CUBE.replace(
             "ENDSEC;
 END-ISO-10303-21;",
@@ -1764,7 +1764,7 @@ END-ISO-10303-21;",
         assert!((hi[2] - 5.0).abs() < 1e-6);
         assert_eq!(m.parts.len(), 1);
         assert!((m.parts[0].color[0] - 1.0).abs() < 1e-6);
-        // Lateral area ~ 2*pi*r*h.
+        // The lateral area is about 2*pi*r*h.
         let mut area = 0.0;
         for t in m.parts[0].positions.chunks(3) {
             let a = [t[0][0] as f64, t[0][1] as f64, t[0][2] as f64];
