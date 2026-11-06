@@ -156,18 +156,17 @@ pub fn model_relative(kicad_path: &str) -> String {
 pub fn model_lib_name(kicad_path: &str) -> Option<(String, String)> {
     let rel = model_relative(kicad_path);
     let (dir, file) = rel.rsplit_once('/')?;
-    let lib = dir
-        .rsplit('/')
-        .next()?
-        .strip_suffix(".3dshapes")
-        .unwrap_or(dir)
-        .to_string();
+    // Only the last folder counts: the pair names a file in the model cache,
+    // so `..` or a whole path must not get into it.
+    let last = dir.rsplit('/').next()?;
+    let lib = last.strip_suffix(".3dshapes").unwrap_or(last).to_string();
     let name = file
         .rsplit_once('.')
         .map(|(n, _)| n)
         .unwrap_or(file)
         .to_string();
-    Some((lib, name))
+    let plain = |s: &str| !s.is_empty() && s != "." && s != "..";
+    (plain(&lib) && plain(&name)).then_some((lib, name))
 }
 
 /// A local file for a model path, preferring STEP over VRML.
@@ -300,6 +299,12 @@ mod tests {
             model_lib_name(p),
             Some(("Resistor_SMD".into(), "R_0603_1608Metric".into()))
         );
+        // A path out of the project folder names only its last folder.
+        assert_eq!(
+            model_lib_name("${KIPRJMOD}/../../models/socket/DS1009.step"),
+            Some(("socket".into(), "DS1009".into()))
+        );
+        assert_eq!(model_lib_name("${KIPRJMOD}/../x.step"), None);
         let t = tempfile::tempdir().unwrap();
         let d = t.path().join("Resistor_SMD.3dshapes");
         std::fs::create_dir_all(&d).unwrap();

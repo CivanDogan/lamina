@@ -44,6 +44,9 @@ enum Cmd {
         /// Fetch missing 3D models from the official KiCad libraries.
         #[arg(long)]
         online: bool,
+        /// Overwrite a board already in the project.
+        #[arg(long)]
+        replace: bool,
     },
     /// Import an EasyEDA PCB JSON into a project (created when missing).
     ImportEasyeda {
@@ -52,9 +55,18 @@ enum Cmd {
         /// Skip fetching 3D models from EasyEDA.
         #[arg(long)]
         no_models: bool,
+        /// Overwrite a board already in the project.
+        #[arg(long)]
+        replace: bool,
     },
     /// Import Gerber and drill files (folder or zip) into a project as artwork.
-    ImportGerbers { path: PathBuf, dir: PathBuf },
+    ImportGerbers {
+        path: PathBuf,
+        dir: PathBuf,
+        /// Overwrite a board already in the project.
+        #[arg(long)]
+        replace: bool,
+    },
     /// Write the assembled board as a STEP file.
     ExportStep {
         dir: PathBuf,
@@ -176,7 +188,12 @@ fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&p.status())?);
             Ok(())
         }
-        Cmd::ImportKicad { file, dir, online } => {
+        Cmd::ImportKicad {
+            file,
+            dir,
+            online,
+            replace,
+        } => {
             let path = dir.to_string_lossy().to_string();
             let name = file
                 .file_stem()
@@ -187,7 +204,7 @@ fn main() -> anyhow::Result<()> {
                 path: file.to_string_lossy().to_string(),
                 models: true,
                 online,
-                replace: false,
+                replace,
                 strict: false,
             })?;
             println!("{}", serde_json::to_string_pretty(&r)?);
@@ -197,6 +214,7 @@ fn main() -> anyhow::Result<()> {
             file,
             dir,
             no_models,
+            replace,
         } => {
             let path = dir.to_string_lossy().to_string();
             let name = file
@@ -207,7 +225,7 @@ fn main() -> anyhow::Result<()> {
             let r = p.import_easyeda_board(lamina_core::ImportEasyedaBoard {
                 path: file.to_string_lossy().to_string(),
                 models: !no_models,
-                replace: false,
+                replace,
                 strict: false,
             })?;
             println!("{}", serde_json::to_string_pretty(&r)?);
@@ -228,7 +246,7 @@ fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&r)?);
             Ok(())
         }
-        Cmd::ImportGerbers { path, dir } => {
+        Cmd::ImportGerbers { path, dir, replace } => {
             let name = path
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -236,7 +254,7 @@ fn main() -> anyhow::Result<()> {
             let mut p = server::open_project(&dir.to_string_lossy(), true, name, false)?;
             let r = p.import_gerbers(lamina_core::ImportGerbers {
                 path: path.to_string_lossy().to_string(),
-                replace: false,
+                replace,
             })?;
             println!("{}", serde_json::to_string_pretty(&r)?);
             Ok(())
