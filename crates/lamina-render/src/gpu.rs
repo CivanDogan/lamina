@@ -147,7 +147,14 @@ impl Camera {
     }
 
     /// Frame a box from a pleasant three-quarter view.
+    /// Fit a box in a square view.
     pub fn frame(lo: [f32; 3], hi: [f32; 3]) -> Camera {
+        Camera::frame_aspect(lo, hi, 1.0)
+    }
+
+    /// Fit a box in a view of `aspect` = width / height: a tall view is
+    /// limited by its narrower horizontal field.
+    pub fn frame_aspect(lo: [f32; 3], hi: [f32; 3], aspect: f32) -> Camera {
         let c = [
             (lo[0] + hi[0]) / 2.0,
             (lo[1] + hi[1]) / 2.0,
@@ -157,11 +164,13 @@ impl Camera {
             .sqrt()
             / 2.0;
         let fov = 30.0f32;
+        let half_v = fov.to_radians() / 2.0;
+        let half_h = (half_v.tan() * aspect.max(0.05)).atan();
         Camera {
             target: c,
             yaw: -62.0,
             pitch: 38.0,
-            distance: (r / (fov.to_radians() / 2.0).sin()).max(5.0) * 1.05,
+            distance: (r / half_v.min(half_h).sin()).max(5.0) * 1.05,
             fov,
         }
     }

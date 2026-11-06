@@ -49,7 +49,8 @@ pub fn snapshot(
             let gpu = Gpu::headless()?;
             let mut cache = MeshCache::default();
             let scene = gpu.upload_3d(s3, s2, &mut cache);
-            let mut cam = Camera::frame(scene.bounds.0, scene.bounds.1);
+            let aspect = width as f32 / height.max(1) as f32;
+            let mut cam = Camera::frame_aspect(scene.bounds.0, scene.bounds.1, aspect);
             cam.yaw = yaw;
             cam.pitch = pitch;
             let t = gpu.target(width, height);

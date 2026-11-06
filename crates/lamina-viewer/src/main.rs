@@ -1,3 +1,6 @@
+// No console window behind the viewer in release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod editor;
 mod edits;
 mod live;
@@ -128,6 +131,9 @@ pub(crate) struct App {
     note_status: Option<(String, Instant)>,
     dirty: bool,
     open_path: String,
+    /// Slot `(i, n)` to move to on the first frame, when opened with other boards.
+    tile: Option<(usize, usize)>,
+    refit_at: Option<Instant>,
 }
 
 fn default_visible(l: SceneLayer) -> bool {
@@ -148,7 +154,7 @@ fn config_file() -> Option<PathBuf> {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>, root: Option<PathBuf>) -> App {
+    fn new(cc: &eframe::CreationContext<'_>, root: Option<PathBuf>, three_d: bool) -> App {
         style::install(&cc.egui_ctx);
         let gpu = cc
             .wgpu_render_state
@@ -171,7 +177,7 @@ impl App {
             g2d: None,
             g3d: None,
             cache: MeshCache::default(),
-            mode: Mode::TwoD,
+            mode: if three_d { Mode::ThreeD } else { Mode::TwoD },
             center: [0.0, 0.0],
             ppm: 20.0,
             fitted: false,
@@ -204,6 +210,8 @@ impl App {
             note_status: None,
             dirty: true,
             open_path: String::new(),
+            tile: tile_slot(),
+            refit_at: None,
         };
         if let Some(r) = root {
             app.open(r, &cc.egui_ctx);
@@ -235,6 +243,12 @@ impl App {
                     let _ = std::fs::create_dir_all(f.parent().unwrap());
                     let _ = std::fs::write(f, root.display().to_string());
                 }
+                // Name the window after the board so several are told apart.
+                let name = std::path::absolute(&root)
+                    .ok()
+                    .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                    .unwrap_or_else(|| root.display().to_string());
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} - Lamina")));
                 self.root = Some(root);
             }
             Err(e) => self.error = Some(e),
@@ -308,9 +322,10 @@ impl App {
         self.dirty = true;
     }
 
-    fn fit_3d(&mut self) {
+    fn fit_3d(&mut self, size_px: Vec2) {
         if let Some(g) = &self.g3d {
-            self.cam = Camera::frame(g.bounds.0, g.bounds.1);
+            let aspect = size_px.x / size_px.y.max(1.0);
+            self.cam = Camera::frame_aspect(g.bounds.0, g.bounds.1, aspect);
             self.cam_fitted = true;
             self.dirty = true;
         }
@@ -552,6 +567,13 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.poll();
         let ctx = ui.ctx().clone();
+        self.place_tile(&ctx);
+        // Fit again once the window has its tiled size.
+        if self.refit_at.is_some_and(|t| Instant::now() >= t) {
+            self.refit_at = None;
+            self.fitted = false;
+            self.cam_fitted = false;
+        }
         let rs = frame.wgpu_render_state().cloned();
 
         egui::Panel::top("top")
@@ -1135,7 +1157,7 @@ impl App {
             self.fit_2d(size_px);
         }
         if !self.cam_fitted {
-            self.fit_3d();
+            self.fit_3d(size_px);
         }
 
         // Input.
@@ -1162,7 +1184,7 @@ impl App {
                 self.dirty = true;
             }
             if keys.0 && self.mode == Mode::ThreeD {
-                self.fit_3d();
+                self.fit_3d(size_px);
             }
         }
         let inside = hover_pos.is_some_and(|p| rect.contains(p));
@@ -1271,7 +1293,7 @@ impl App {
                     self.dirty = true;
                 }
                 if resp.double_clicked() {
-                    self.fit_3d();
+                    self.fit_3d(size_px);
                 }
             }
         }
@@ -1449,19 +1471,115 @@ fn short_path(p: &Path) -> String {
     }
 }
 
+/// Env var telling a viewer its slot `i/n` when several boards are opened together.
+const TILE_ENV: &str = "LAMINA_VIEWER_TILE";
+
+fn tile_slot() -> Option<(usize, usize)> {
+    let v = std::env::var(TILE_ENV).ok()?;
+    let (i, n) = v.split_once('/')?;
+    let (i, n) = (i.parse().ok()?, n.parse().ok()?);
+    (n > 1 && i < n).then_some((i, n))
+}
+
+impl App {
+    /// Side by side with the other windows opened in the same command.
+    fn place_tile(&mut self, ctx: &egui::Context) {
+        let Some((i, n)) = self.tile else { return };
+        let Some(m) = ctx.input(|inp| inp.viewport().monitor_size) else {
+            return;
+        };
+        self.tile = None;
+        let w = m.x / n as f32;
+        // Room for the title bar and the taskbar.
+        let h = m.y - 90.0;
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(
+            w * i as f32,
+            0.0,
+        )));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w - 16.0, h)));
+        self.refit_at = Some(Instant::now() + Duration::from_millis(400));
+        ctx.request_repaint_after(Duration::from_millis(450));
+    }
+}
+
+/// A GUI-subsystem exe has no console; print into the one it was started from.
+fn attach_console() {
+    #[cfg(windows)]
+    {
+        unsafe extern "system" {
+            fn AttachConsole(pid: u32) -> i32;
+        }
+        // ATTACH_PARENT_PROCESS
+        unsafe {
+            AttachConsole(u32::MAX);
+        }
+    }
+}
+
+const USAGE: &str = "Usage: lamina-viewer [--3d] [BOARD_DIR]...
+
+Opens a window on each Lamina project folder (one window per folder),
+side by side. Without a folder it reopens the last one.
+
+  --3d  start in the 3D view";
+
 fn main() -> eframe::Result<()> {
-    let root = std::env::args().nth(1).map(PathBuf::from);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a.starts_with('-')) {
+        attach_console();
+    }
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "-V" || a == "--version") {
+        println!("lamina-viewer {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    let three_d = args.iter().any(|a| a == "--3d");
+    let args: Vec<String> = args.into_iter().filter(|a| a != "--3d").collect();
+    if let Some(bad) = args.iter().find(|a| a.starts_with('-')) {
+        eprintln!(
+            "unknown option {bad}
+
+{USAGE}"
+        );
+        std::process::exit(2);
+    }
+    // One process per board: the first here, the rest as their own windows.
+    if args.len() > 1 {
+        if let Ok(exe) = std::env::current_exe() {
+            for (i, a) in args.iter().enumerate().skip(1) {
+                let mut cmd = std::process::Command::new(&exe);
+                if three_d {
+                    cmd.arg("--3d");
+                }
+                let spawned = cmd
+                    .arg(a)
+                    .env(TILE_ENV, format!("{i}/{}", args.len()))
+                    .spawn();
+                if let Err(e) = spawned {
+                    eprintln!("could not open {a}: {e}");
+                }
+            }
+        }
+    }
+    if args.len() > 1 {
+        // SAFETY: single-threaded here, before any window or worker starts.
+        unsafe { std::env::set_var(TILE_ENV, format!("0/{}", args.len())) };
+    }
+    let root = args.first().map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Lamina")
             .with_inner_size([1480.0, 920.0])
-            .with_min_inner_size([980.0, 620.0]),
+            .with_min_inner_size([640.0, 480.0]),
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
     eframe::run_native(
         "Lamina",
         options,
-        Box::new(move |cc| Ok(Box::new(App::new(cc, root)))),
+        Box::new(move |cc| Ok(Box::new(App::new(cc, root, three_d)))),
     )
 }
