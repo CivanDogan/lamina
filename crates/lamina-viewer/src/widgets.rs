@@ -400,17 +400,16 @@ pub fn hint(p: &egui::Painter, rect: Rect, text: &str) {
         n -= 1;
         line = format!("{} · F1 for more", items[..n].join(" · "));
     }
-    // Centred in the space right of the scale bar.
-    p.text(
-        Pos2::new(
-            rect.left() + 140.0 + (rect.width() - 140.0) / 2.0,
-            rect.bottom() - 16.0,
-        ),
-        Align2::CENTER_CENTER,
-        line,
-        body(12.0),
-        TEXT_3,
+    // Centred in the space right of the scale bar, on a backing so it
+    // reads over copper.
+    let at = Pos2::new(
+        rect.left() + 140.0 + (rect.width() - 140.0) / 2.0,
+        rect.bottom() - 16.0,
     );
+    let g = p.layout_no_wrap(line, body(12.0), TEXT_2);
+    let r = Rect::from_center_size(at, g.size()).expand2(Vec2::new(8.0, 3.0));
+    p.rect_filled(r, CornerRadius::same(5), Color32::from_black_alpha(150));
+    p.galley(r.min + Vec2::new(8.0, 3.0), g, TEXT_2);
 }
 
 /// Toolbar button: label with its shortcut key, accent when active.

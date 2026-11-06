@@ -536,9 +536,8 @@ impl App {
                 TEXT_2,
             );
         }
-        if ui.input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::F1))
-            || ui.input(|i| i.pointer.any_pressed())
-        {
+        // F1 itself is handled with the other keys (it toggles).
+        if ui.input(|i| i.key_pressed(egui::Key::Escape) || i.pointer.any_pressed()) {
             self.help = false;
         }
     }

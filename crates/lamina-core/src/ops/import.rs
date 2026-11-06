@@ -67,6 +67,11 @@ fn data_dir() -> PathBuf {
 /// The project folder an opened board file is imported into: one per
 /// source path, under the user's local data folder.
 pub fn import_dir_for(file: &Path) -> PathBuf {
+    import_dir_in(&data_dir().join("imports"), file)
+}
+
+/// Like [`import_dir_for`], under `base`.
+pub fn import_dir_in(base: &Path, file: &Path) -> PathBuf {
     let abs = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
     // A single Gerber stands for its whole folder.
     let src = if !abs.is_dir()
@@ -91,13 +96,31 @@ pub fn import_dir_for(file: &Path) -> PathBuf {
         })
         .collect();
     let key = src.to_string_lossy().to_lowercase();
-    data_dir()
-        .join("imports")
-        .join(format!("{stem}-{:08x}", fnv(&key) as u32))
+    base.join(format!("{stem}-{:08x}", fnv(&key) as u32))
 }
 
 fn modified(p: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
+}
+
+/// When a source last changed: a file's own time, or the newest file in a
+/// folder (a folder's own time ignores files edited in place).
+fn source_modified(p: &Path) -> Option<std::time::SystemTime> {
+    let dir = if p.is_dir() {
+        Some(p.to_path_buf())
+    } else if matches!(board_file_kind(p), Some(BoardFile::Gerbers)) && ext(p) != "zip" {
+        p.parent().map(Path::to_path_buf)
+    } else {
+        None
+    };
+    match dir {
+        Some(d) => std::fs::read_dir(&d)
+            .ok()?
+            .flatten()
+            .filter_map(|e| modified(&e.path()))
+            .max(),
+        None => modified(p),
+    }
 }
 
 /// Import `file` into `dir`, replacing a board already there.
@@ -149,6 +172,11 @@ pub fn import_board_file(file: &Path, dir: &Path) -> Result<OpResult> {
 /// newer than the import. Returns the folder and the import result when an
 /// import ran.
 pub fn open_board_path(path: &Path) -> Result<(PathBuf, Option<OpResult>)> {
+    open_board_path_in(&data_dir().join("imports"), path)
+}
+
+/// Like [`open_board_path`], with imports under `base`.
+pub fn open_board_path_in(base: &Path, path: &Path) -> Result<(PathBuf, Option<OpResult>)> {
     if ProjectData::is_project(path) {
         return Ok((path.to_path_buf(), None));
     }
@@ -157,9 +185,9 @@ pub fn open_board_path(path: &Path) -> Result<(PathBuf, Option<OpResult>)> {
             return Ok((dir.to_path_buf(), None));
         }
     }
-    let dir = import_dir_for(path);
+    let dir = import_dir_in(base, path);
     let stamp = dir.join(".imported");
-    let fresh = match (modified(path), modified(&stamp)) {
+    let fresh = match (source_modified(path), modified(&stamp)) {
         (Some(src), Some(done)) => done >= src && ProjectData::is_project(&dir),
         _ => false,
     };
@@ -193,5 +221,45 @@ mod tests {
         assert_ne!(import_dir_for(&k), import_dir_for(&g));
         assert_eq!(board_file_kind(&t.path().join("x.txt")), None);
         assert_eq!(fnv("a"), 0xaf63_dc4c_8601_ec8c);
+    }
+
+    #[test]
+    fn opens_a_board_file_once_and_again_when_it_changes() {
+        let t = tempfile::tempdir().unwrap();
+        let file = t.path().join("b.kicad_pcb");
+        std::fs::write(
+            &file,
+            r#"(kicad_pcb (version 20240108) (generator "t")
+  (layers (0 "F.Cu" signal) (31 "B.Cu" signal) (44 "Edge.Cuts" user))
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts") (width 0.1)))"#,
+        )
+        .unwrap();
+        let base = t.path().join("imports");
+        let (dir, first) = open_board_path_in(&base, &file).unwrap();
+        assert!(first.is_some());
+        assert!(dir.starts_with(&base));
+        assert!(ProjectData::is_project(&dir));
+        // Unchanged source: the import is reused.
+        let (again, second) = open_board_path_in(&base, &file).unwrap();
+        assert_eq!(again, dir);
+        assert!(second.is_none());
+        // Newer source: imported again.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert!(open_board_path_in(&base, &file).unwrap().1.is_some());
+        // A project folder opens as itself.
+        let (same, ran) = open_board_path_in(&base, &dir).unwrap();
+        assert_eq!(same, dir);
+        assert!(ran.is_none());
+        // Something else is refused with a clear message.
+        let txt = t.path().join("notes.txt");
+        std::fs::write(&txt, "x").unwrap();
+        let e = open_board_path_in(&base, &txt).unwrap_err().to_string();
+        assert!(e.contains("not a board file"), "{e}");
     }
 }

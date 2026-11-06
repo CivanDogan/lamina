@@ -128,3 +128,44 @@ fn crossing_bus_is_negotiated_clean() {
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
 }
+
+#[test]
+fn vias_respect_copper_on_layers_the_router_may_not_use() {
+    // 4 layers, routing on top and bottom only. In1 is covered by another
+    // net, so any through via would short there: the net must fail, not short.
+    let mut d = ProjectData::new("x");
+    d.board.outline = Some(Contour::rect(0.0, 0.0, 30.0, 20.0));
+    d.board.stackup.copper_layers = 4;
+    let fp = from_package("R_0603", &Options::default(), None).unwrap();
+    d.footprints.insert(fp.id.clone(), fp);
+    d.parts.parts.insert("R1".into(), Part::new("R_0603"));
+    d.parts.parts.insert("R2".into(), Part::new("R_0603"));
+    d.placement
+        .placements
+        .insert("R1".into(), Placement::at(5.0, 10.0));
+    let mut back = Placement::at(25.0, 10.0);
+    back.side = Side::Bottom;
+    d.placement.placements.insert("R2".into(), back);
+    let net = |pads: &[&str]| Net {
+        pads: pads.iter().map(|p| p.parse().unwrap()).collect(),
+        class: None,
+    };
+    d.nets.nets.insert("A".into(), net(&["R1.1", "R2.1"]));
+    d.nets.nets.insert("B".into(), net(&[]));
+    d.routing.tracks.push(Track {
+        id: "t1".into(),
+        net: "B".into(),
+        layer: Layer::Copper(Copper::from_index(1, 4)),
+        width: 19.0,
+        points: vec![Point::new(0.5, 10.0), Point::new(29.5, 10.0)],
+    });
+    let opt = RouteOptions {
+        layers: Some(vec![Layer::TOP, Layer::BOTTOM]),
+        nets: Some(vec!["A".into()]),
+        time_limit: Some(10.0),
+        ..Default::default()
+    };
+    let out = autoroute(&d, &opt).unwrap();
+    assert!(out.vias.is_empty(), "{:?}", out.vias);
+    assert_eq!(out.failed.len(), 1);
+}

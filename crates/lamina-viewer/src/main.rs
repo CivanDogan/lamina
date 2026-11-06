@@ -1719,7 +1719,13 @@ impl Shell {
             }
             if let Some((e, t)) = &self.add_error {
                 if t.elapsed() < Duration::from_secs(8) {
-                    ui.label(egui::RichText::new(e).font(body(12.0)).color(ERROR))
+                    // Long import errors stay one line; the whole text is on hover.
+                    let short: String = if e.chars().count() > 90 {
+                        format!("{}…", e.chars().take(89).collect::<String>())
+                    } else {
+                        e.clone()
+                    };
+                    ui.label(egui::RichText::new(short).font(body(12.0)).color(ERROR))
                         .on_hover_text(e);
                 }
             }
@@ -1743,6 +1749,8 @@ pub(crate) enum OpenRequest {
 /// A file dialog or an import running off the UI thread.
 struct Job {
     label: String,
+    /// The file being imported; `None` for a dialog.
+    path: Option<PathBuf>,
     rx: std::sync::mpsc::Receiver<JobDone>,
 }
 
@@ -1756,6 +1764,7 @@ impl Shell {
     fn spawn(
         &mut self,
         label: String,
+        path: Option<PathBuf>,
         ctx: &egui::Context,
         f: impl FnOnce() -> JobDone + Send + 'static,
     ) {
@@ -1765,12 +1774,17 @@ impl Shell {
             let _ = tx.send(f());
             ctx.request_repaint();
         });
-        self.jobs.push(Job { label, rx });
+        self.jobs.push(Job { label, path, rx });
     }
 
     fn request(&mut self, r: OpenRequest, ctx: &egui::Context) {
+        // One dialog at a time, and one import per file.
+        let dialog_open = self.jobs.iter().any(|j| j.path.is_none());
+        if dialog_open && matches!(r, OpenRequest::PickFile | OpenRequest::PickFolder) {
+            return;
+        }
         match r {
-            OpenRequest::PickFile => self.spawn(String::new(), ctx, || {
+            OpenRequest::PickFile => self.spawn(String::new(), None, ctx, || {
                 JobDone::Picked(
                     rfd::FileDialog::new()
                         .set_title("Open a board")
@@ -1786,7 +1800,7 @@ impl Shell {
                         .pick_file(),
                 )
             }),
-            OpenRequest::PickFolder => self.spawn(String::new(), ctx, || {
+            OpenRequest::PickFolder => self.spawn(String::new(), None, ctx, || {
                 JobDone::Picked(
                     rfd::FileDialog::new()
                         .set_title("Open a Lamina project or Gerber folder")
@@ -1811,11 +1825,19 @@ impl Shell {
                     ));
                     return;
                 }
+                if self
+                    .jobs
+                    .iter()
+                    .any(|j| j.path.as_deref() == Some(p.as_path()))
+                {
+                    return;
+                }
                 let name = p
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                self.spawn(format!("Importing {name}…"), ctx, move || {
+                let key = Some(p.clone());
+                self.spawn(format!("Importing {name}…"), key, ctx, move || {
                     JobDone::Opened(
                         lamina_core::open_board_path(&p)
                             .map(|(dir, _)| dir)

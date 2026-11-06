@@ -249,7 +249,8 @@ impl<'a> Ctx<'a> {
         // O(cells * edges).
         let mut inside_cells = Vec::new();
         raster(&g, &rings[0], &rings[1..], 0, &mut inside_cells);
-        let band = 2.0f32;
+        // Wide enough for the largest edge rule plus a via.
+        let band = (d.board.rules.copper_to_edge + 2.0) as f32;
         let mut edge_dist = vec![-band; g.plane()];
         for c in inside_cells {
             edge_dist[c] = band;
@@ -336,9 +337,11 @@ impl<'a> Ctx<'a> {
         let mut owner = vec![FREE; n];
         let margin = g.pitch * 0.75;
         let edge_need = (rules.copper_to_edge + p.hw) as f32;
+        // Layers the router may not use keep their real owners: a through
+        // via still has copper there and must clear other nets.
         for l in 0..g.nl {
             for i in 0..g.plane() {
-                if !self.allowed[l] || self.edge_dist[i] < edge_need {
+                if self.edge_dist[i] < edge_need {
                     owner[l * g.plane() + i] = HARD;
                 }
             }
@@ -456,11 +459,10 @@ impl<'a> Ctx<'a> {
         });
         let pi = self.profiles.len() - 1;
         // Stamp what is already routed for the new profile.
-        for (ni, r) in routed.iter().enumerate() {
+        for r in routed {
             if r.paths.is_empty() {
                 continue;
             }
-            let _ = ni;
             let cov = self.coverage(r, pi);
             for &c in &cov {
                 let o = &mut self.profiles[pi].occ[c as usize];
@@ -470,7 +472,7 @@ impl<'a> Ctx<'a> {
         pi
     }
 
-    /// Cells net `ni`'s geometry `r` covers for victims of profile `pi`.
+    /// Cells a net's geometry `r` covers for victims of profile `pi`.
     fn coverage(&self, r: &Routed, pi: usize) -> Vec<u32> {
         let g = &self.g;
         let victim = self.profiles[pi].p;
@@ -515,10 +517,9 @@ impl<'a> Ctx<'a> {
         cells
     }
 
-    /// Add (or remove) a net's geometry to every profile's occupancy. The
-    /// coverage is recomputed, so a profile made after the net was stamped
-    /// (and stamped with it then) is undone too.
-    /// Fill the coverage cache up to the current number of profiles.
+    /// Fill the coverage cache up to the current number of profiles. A
+    /// profile made after the net was stamped stamped it then with the same
+    /// coverage, so adding and removing stay symmetric.
     fn ensure_cov(&self, r: &mut Routed) {
         while r.cov.len() < self.profiles.len() {
             let pi = r.cov.len();
@@ -527,6 +528,7 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// Add (or remove) a net's geometry to every profile's occupancy.
     fn stamp(&mut self, r: &mut Routed, add: bool) {
         self.ensure_cov(r);
         for pi in 0..self.profiles.len() {
@@ -579,6 +581,8 @@ impl<'a> Ctx<'a> {
 #[derive(Copy, Clone, PartialEq)]
 struct Node {
     f: f32,
+    /// Path cost when pushed; an entry whose cost was since lowered is stale.
+    g: f32,
     idx: u32,
 }
 impl Eq for Node {}
@@ -715,14 +719,15 @@ fn astar(ctx: &Ctx, s: &mut Search, q: &Query) -> Option<Vec<usize>> {
         s.seen[src] = stamp_no;
         open.push(Node {
             f: h(src),
+            g: 0.0,
             idx: src as u32,
         });
     }
     let mut expanded = 0usize;
-    while let Some(Node { idx, f }) = open.pop() {
+    while let Some(Node { idx, g: pushed, .. }) = open.pop() {
         let idx = idx as usize;
         let base = s.cost[idx];
-        if f - h(idx) > base + 1e-3 {
+        if pushed > base {
             continue; // stale entry
         }
         if is_target(s, idx) {
@@ -750,6 +755,7 @@ fn astar(ctx: &Ctx, s: &mut Search, q: &Query) -> Option<Vec<usize>> {
                 s.came[j] = idx as u32;
                 open.push(Node {
                     f: c + h(j),
+                    g: c,
                     idx: j as u32,
                 });
             }
@@ -799,8 +805,8 @@ fn astar(ctx: &Ctx, s: &mut Search, q: &Query) -> Option<Vec<usize>> {
             for l2 in 0..g.nl {
                 let j = g.idx(l2, x as usize, y as usize);
                 let o = st.owner[j];
-                // Via copper may not reach other nets, nor hang off the board.
-                if !(o == FREE || o == q.net || (o == HARD && !ctx.allowed[l2])) {
+                // Via copper may not reach other nets on any layer.
+                if !(o == FREE || o == q.net) {
                     ok = false;
                     break 'disk;
                 }
@@ -1362,7 +1368,8 @@ fn route_once_with(
             break;
         }
         todo = conflicted;
-        pres *= 1.6;
+        // Capped: past this the soft costs are as good as walls anyway.
+        pres = (pres * 1.6).min(1000.0);
     }
 
     if dbg {
