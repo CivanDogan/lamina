@@ -1551,6 +1551,12 @@ fn remembered_boards() -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
+/// Whether two paths name the same folder, however they were written.
+fn same_path(a: &Path, b: &Path) -> bool {
+    let abs = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    abs(a) == abs(b)
+}
+
 /// A dropped folder, or a file inside a project folder, as a project root.
 fn project_root(p: &Path) -> Option<PathBuf> {
     if ProjectData::is_project(p) {
@@ -1604,11 +1610,10 @@ impl Shell {
     }
 
     fn add(&mut self, root: PathBuf, ctx: &egui::Context, rs: Option<&egui_wgpu::RenderState>) {
-        let abs = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
         if let Some(i) = self
             .boards
             .iter()
-            .position(|b| b.root.as_deref().map(abs) == Some(abs(&root)))
+            .position(|b| b.root.as_deref().is_some_and(|x| same_path(x, &root)))
         {
             self.focus = i;
             return;
@@ -1726,7 +1731,12 @@ impl Shell {
                     }
                     let recent: Vec<PathBuf> = remembered_boards()
                         .into_iter()
-                        .filter(|r| !self.boards.iter().any(|b| b.root.as_ref() == Some(r)))
+                        .filter(|r| {
+                            !self
+                                .boards
+                                .iter()
+                                .any(|b| b.root.as_deref().is_some_and(|x| same_path(x, r)))
+                        })
                         .collect();
                     if !recent.is_empty() {
                         ui.separator();

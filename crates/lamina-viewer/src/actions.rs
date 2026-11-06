@@ -181,14 +181,10 @@ impl App {
         });
     }
 
-    fn export_fab(&mut self, root: PathBuf) {
+    fn export_fab(&mut self, root: PathBuf, force: bool) {
         self.spawn_bg(move || {
-            let r = lamina_core::Project::open_shared(&root).and_then(|p| {
-                p.export(lamina_core::Export {
-                    dir: None,
-                    force: false,
-                })
-            });
+            let r = lamina_core::Project::open_shared(&root)
+                .and_then(|p| p.export(lamina_core::Export { dir: None, force }));
             match r {
                 Ok(x) => (
                     format!(
@@ -198,7 +194,14 @@ impl App {
                     ),
                     true,
                 ),
-                Err(e) => (format!("Export failed: {e}"), false),
+                // The engine's refusal speaks to agents; say what to click.
+                Err(e) => (
+                    format!("Export failed: {e}").replace(
+                        "fix them or pass force: true",
+                        "fix them or use Board › Export fab files anyway",
+                    ),
+                    false,
+                ),
             }
         });
     }
@@ -290,9 +293,24 @@ impl App {
             ui.separator();
             if ui
                 .button("Export fab files (Gerbers, drill, BOM, CPL)")
+                .on_hover_text("Refused while the board has DRC errors")
                 .clicked()
             {
-                self.export_fab(root.clone());
+                self.export_fab(root.clone(), false);
+                ui.close();
+            }
+            let errors = self.loaded.as_ref().is_some_and(|l| {
+                l.analysis
+                    .violations
+                    .iter()
+                    .any(|v| v.severity == lamina_model::Severity::Error)
+            });
+            if errors
+                && ui
+                    .button("Export fab files anyway (ignore DRC errors)")
+                    .clicked()
+            {
+                self.export_fab(root.clone(), true);
                 ui.close();
             }
             if ui.button("Export STEP (board and parts)").clicked() {

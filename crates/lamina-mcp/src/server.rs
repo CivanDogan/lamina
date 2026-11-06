@@ -682,8 +682,12 @@ impl Lamina {
         self.with(|proj| proj.delete_items(p))
     }
 
-    /// Route unrouted connections on a grid (45-degree tracks, vias between
-    /// layers). Skip nets you will pour, e.g. `{"skip": ["GND"]}`.
+    /// Route every open connection (45-degree tracks, vias between layers)
+    /// with the built-in router: nets negotiate for space, failures are
+    /// repaired on a finer grid, and pours are refilled with what they leave
+    /// open routed too. Add pours (`add_zone`) first: a poured net then only
+    /// gets wires where its pour cannot reach. `skip` is for nets you route
+    /// by hand.
     #[tool(annotations(title = "Autoroute"))]
     async fn autoroute(
         &self,

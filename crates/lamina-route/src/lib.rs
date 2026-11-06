@@ -24,7 +24,8 @@ pub struct RouteOptions {
     /// Nets to route (default: every net with unrouted connections).
     #[serde(default)]
     pub nets: Option<Vec<String>>,
-    /// Nets to leave alone, e.g. `GND` when it will be poured.
+    /// Nets to leave alone (routed by hand). A net with a pour need not be
+    /// skipped: it is routed only where its pour does not reach.
     #[serde(default)]
     pub skip: Vec<String>,
     /// Copper layers the router may use (default all).
