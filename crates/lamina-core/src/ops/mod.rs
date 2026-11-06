@@ -1,4 +1,5 @@
 pub mod board;
+pub mod import;
 pub mod kicad;
 pub mod layout;
 pub mod lcsc;
@@ -12,6 +13,7 @@ pub mod specctra;
 pub mod status;
 
 pub use board::{RectSpec, SetOutline, SetRules, SetStackup, UseFabPreset};
+pub use import::{BoardFile, board_file_kind, import_board_file, import_dir_for, open_board_path};
 pub use kicad::{
     ExportKicad, ImportKicadBoard, ImportKicadFootprint, KicadExported, KicadSearch,
     SearchKicadFootprints,

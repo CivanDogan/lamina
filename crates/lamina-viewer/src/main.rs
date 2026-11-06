@@ -131,9 +131,14 @@ pub(crate) struct App {
     note_status: Option<(String, Instant)>,
     dirty: bool,
     open_path: String,
-    /// Slot `(i, n)` to move to on the first frame, when opened with other boards.
-    tile: Option<(usize, usize)>,
-    refit_at: Option<Instant>,
+    /// Takes keyboard shortcuts (the board last clicked when several are open).
+    pub(crate) focused: bool,
+    /// Asked for from the empty state; the shell carries it out.
+    pub(crate) request: Option<OpenRequest>,
+    /// View and canvas size of the last automatic fit; while the view is
+    /// untouched, a resized canvas is fitted again.
+    fit_2d_at: Option<([f64; 2], f64, Vec2)>,
+    fit_3d_at: Option<(Camera, Vec2)>,
 }
 
 fn default_visible(l: SceneLayer) -> bool {
@@ -154,18 +159,7 @@ fn config_file() -> Option<PathBuf> {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>, root: Option<PathBuf>, three_d: bool) -> App {
-        style::install(&cc.egui_ctx);
-        let gpu = cc
-            .wgpu_render_state
-            .as_ref()
-            .map(|rs| Gpu::new(rs.device.clone(), rs.queue.clone()));
-        let root = root.or_else(|| {
-            config_file()
-                .and_then(|f| std::fs::read_to_string(f).ok())
-                .map(|s| PathBuf::from(s.trim()))
-                .filter(|p| ProjectData::is_project(p))
-        });
+    fn new(gpu: Option<Gpu>, root: Option<PathBuf>, three_d: bool, ctx: &egui::Context) -> App {
         let mut app = App {
             root: None,
             live: None,
@@ -210,11 +204,13 @@ impl App {
             note_status: None,
             dirty: true,
             open_path: String::new(),
-            tile: tile_slot(),
-            refit_at: None,
+            focused: true,
+            request: None,
+            fit_2d_at: None,
+            fit_3d_at: None,
         };
         if let Some(r) = root {
-            app.open(r, &cc.egui_ctx);
+            app.open(r, ctx);
         }
         app
     }
@@ -239,16 +235,6 @@ impl App {
                 self.sel.clear();
                 self.set_tool(Tool::Select);
                 self.error = None;
-                if let Some(f) = config_file() {
-                    let _ = std::fs::create_dir_all(f.parent().unwrap());
-                    let _ = std::fs::write(f, root.display().to_string());
-                }
-                // Name the window after the board so several are told apart.
-                let name = std::path::absolute(&root)
-                    .ok()
-                    .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-                    .unwrap_or_else(|| root.display().to_string());
-                ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} - Lamina")));
                 self.root = Some(root);
             }
             Err(e) => self.error = Some(e),
@@ -318,6 +304,7 @@ impl App {
         let sx = (size_px.x as f64 * 0.86) / b.width().max(1.0);
         let sy = (size_px.y as f64 * 0.86) / b.height().max(1.0);
         self.ppm = sx.min(sy).clamp(0.5, 4000.0);
+        self.fit_2d_at = Some((self.center, self.ppm, size_px));
         self.fitted = true;
         self.dirty = true;
     }
@@ -326,6 +313,7 @@ impl App {
         if let Some(g) = &self.g3d {
             let aspect = size_px.x / size_px.y.max(1.0);
             self.cam = Camera::frame_aspect(g.bounds.0, g.bounds.1, aspect);
+            self.fit_3d_at = Some((self.cam, size_px));
             self.cam_fitted = true;
             self.dirty = true;
         }
@@ -563,66 +551,9 @@ fn draw_prim(painter: &egui::Painter, xf: &Xf, prim: &Prim, color: Color32, glow
 
 // ---------------------------------------------------------------- app
 
-impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        self.poll();
-        let ctx = ui.ctx().clone();
-        self.place_tile(&ctx);
-        // Fit again once the window has its tiled size.
-        if self.refit_at.is_some_and(|t| Instant::now() >= t) {
-            self.refit_at = None;
-            self.fitted = false;
-            self.cam_fitted = false;
-        }
-        let rs = frame.wgpu_render_state().cloned();
-
-        egui::Panel::top("top")
-            .exact_size(44.0)
-            .frame(
-                egui::Frame::new()
-                    .fill(PANEL)
-                    .inner_margin(egui::Margin::symmetric(14, 0)),
-            )
-            .show(ui, |ui| self.top_bar(ui));
-        egui::Panel::bottom("status")
-            .exact_size(26.0)
-            .frame(
-                egui::Frame::new()
-                    .fill(PANEL)
-                    .inner_margin(egui::Margin::symmetric(14, 0)),
-            )
-            .show(ui, |ui| self.status_bar(ui));
-        if self.loaded.is_some() {
-            egui::Panel::left("layers")
-                .exact_size(236.0)
-                .resizable(false)
-                .frame(
-                    egui::Frame::new()
-                        .fill(PANEL)
-                        .inner_margin(egui::Margin::same(12)),
-                )
-                .show(ui, |ui| self.layer_panel(ui));
-            egui::Panel::right("inspector")
-                .default_size(312.0)
-                .size_range(260.0..=520.0)
-                .resizable(true)
-                .frame(
-                    egui::Frame::new()
-                        .fill(PANEL)
-                        .inner_margin(egui::Margin::same(12)),
-                )
-                .show(ui, |ui| self.inspector(ui));
-        }
-        egui::CentralPanel::no_frame().show(ui, |ui| {
-            if self.loaded.is_some() {
-                if let Some(rs) = &rs {
-                    self.canvas(ui, rs);
-                }
-            } else {
-                self.empty_state(ui);
-            }
-        });
-
+impl App {
+    /// Per-frame upkeep after drawing; true while something animates.
+    fn animating(&mut self) -> bool {
         let animating = self
             .flashes
             .iter()
@@ -638,91 +569,131 @@ impl eframe::App for App {
             || self.editor.as_ref().is_some_and(|e| e.busy > 0);
         self.flashes
             .retain(|(_, t)| t.elapsed() < Duration::from_millis(900));
-        if animating {
-            ctx.request_repaint();
-        } else if self
-            .last_reload
+        animating
+    }
+
+    fn recently_reloaded(&self) -> bool {
+        self.last_reload
             .is_some_and(|t| t.elapsed() < Duration::from_secs(60))
-        {
-            ctx.request_repaint_after(Duration::from_secs(1));
+    }
+
+    /// Name shown on the board's tab.
+    fn tab_name(&self) -> String {
+        if let Some(l) = &self.loaded {
+            return l.data.board.name.clone();
+        }
+        self.root
+            .as_ref()
+            .and_then(|r| std::path::absolute(r).ok())
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "Open a board".into())
+    }
+
+    /// Error, warning, clean, or not loaded.
+    fn health(&self) -> Color32 {
+        let Some(l) = &self.loaded else {
+            return TEXT_3;
+        };
+        let v = &l.analysis.violations;
+        if v.iter().any(|v| v.severity == Severity::Error) {
+            ERROR
+        } else if !v.is_empty() {
+            WARN
+        } else {
+            OK
         }
     }
-}
 
-impl App {
-    fn top_bar(&mut self, ui: &mut egui::Ui) {
+    /// DRC, routing and live chips, laid out right to left.
+    fn chips(&self, ui: &mut egui::Ui) {
+        let Some(l) = self.loaded.as_ref() else {
+            return;
+        };
+        let errors = l
+            .analysis
+            .violations
+            .iter()
+            .filter(|v| v.severity == Severity::Error)
+            .count();
+        let warnings = l.analysis.violations.len() - errors;
+        let unrouted = l.analysis.ratsnest.len();
+        widgets::live_dot(ui, self.last_reload);
+        ui.add_space(6.0);
+        if !l.generated.is_empty() {
+            widgets::chip(ui, TEXT_2, "design.jsonnet");
+        }
+        widgets::chip(
+            ui,
+            if unrouted == 0 { OK } else { TEXT_2 },
+            &if unrouted == 0 {
+                "all routed".to_string()
+            } else {
+                format!("{unrouted} unrouted")
+            },
+        );
+        let (c, text) = if errors > 0 {
+            (
+                ERROR,
+                format!("{errors} error{}", if errors == 1 { "" } else { "s" }),
+            )
+        } else if warnings > 0 {
+            (
+                WARN,
+                format!("{warnings} warning{}", if warnings == 1 { "" } else { "s" }),
+            )
+        } else {
+            (OK, "DRC clean".to_string())
+        };
+        widgets::chip(ui, c, &text);
+    }
+
+    /// Strip above a board's canvas: name and path, 2D/3D switch, close.
+    /// Returns true when the close button was clicked.
+    fn pane_header(&mut self, ui: &mut egui::Ui, closable: bool) -> bool {
+        let mut close = false;
         ui.horizontal_centered(|ui| {
-            widgets::wordmark(ui);
-            ui.add_space(14.0);
-            if let Some(l) = &self.loaded {
-                ui.label(
-                    egui::RichText::new(&l.data.board.name)
-                        .font(semibold(13.5))
-                        .color(TEXT),
-                );
-                if let Some(root) = &self.root {
-                    ui.label(
-                        egui::RichText::new(short_path(root))
-                            .font(body(12.0))
-                            .color(TEXT_3),
-                    )
-                    .on_hover_text(root.display().to_string());
-                }
-            }
-            if self.loaded.is_none() {
-                return;
-            }
-            // Centered view switch.
-            let center_x = ui.max_rect().center().x;
-            let mut sel = if self.mode == Mode::TwoD { 0 } else { 1 };
-            let rect = ERect::from_center_size(
-                Pos2::new(center_x, ui.max_rect().center().y),
-                Vec2::new(132.0, 28.0),
+            ui.add_space(10.0);
+            let (dot, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+            ui.painter().circle_filled(dot.center(), 3.5, self.health());
+            ui.label(
+                egui::RichText::new(self.tab_name())
+                    .font(semibold(13.0))
+                    .color(TEXT),
             );
-            if widgets::segmented(ui, rect, &["2D", "3D"], &mut sel) {
-                self.mode = if sel == 0 { Mode::TwoD } else { Mode::ThreeD };
-                self.dirty = true;
+            if let Some(root) = &self.root {
+                ui.label(
+                    egui::RichText::new(short_path(root))
+                        .font(body(11.5))
+                        .color(TEXT_3),
+                )
+                .on_hover_text(root.display().to_string());
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let l = self.loaded.as_ref().unwrap();
-                let errors = l
-                    .analysis
-                    .violations
-                    .iter()
-                    .filter(|v| v.severity == Severity::Error)
-                    .count();
-                let warnings = l.analysis.violations.len() - errors;
-                let unrouted = l.analysis.ratsnest.len();
-                widgets::live_dot(ui, self.last_reload);
-                ui.add_space(6.0);
-                if !l.generated.is_empty() {
-                    widgets::chip(ui, TEXT_2, "design.jsonnet");
+                ui.add_space(8.0);
+                if closable
+                    && ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("×").font(body(15.0)).color(TEXT_2),
+                            )
+                            .frame(false),
+                        )
+                        .on_hover_text("Close this board")
+                        .clicked()
+                {
+                    close = true;
                 }
-                widgets::chip(
-                    ui,
-                    if unrouted == 0 { OK } else { TEXT_2 },
-                    &if unrouted == 0 {
-                        "all routed".to_string()
-                    } else {
-                        format!("{unrouted} unrouted")
-                    },
-                );
-                let (c, text) = if errors > 0 {
-                    (
-                        ERROR,
-                        format!("{errors} error{}", if errors == 1 { "" } else { "s" }),
-                    )
-                } else if warnings > 0 {
-                    (
-                        WARN,
-                        format!("{warnings} warning{}", if warnings == 1 { "" } else { "s" }),
-                    )
-                } else {
-                    (OK, "DRC clean".to_string())
-                };
-                widgets::chip(ui, c, &text);
+                if self.loaded.is_some() {
+                    let (rect, _) = ui.allocate_exact_size(Vec2::new(108.0, 24.0), Sense::hover());
+                    let mut sel = if self.mode == Mode::TwoD { 0 } else { 1 };
+                    if widgets::segmented(ui, rect, &["2D", "3D"], &mut sel) {
+                        self.mode = if sel == 0 { Mode::TwoD } else { Mode::ThreeD };
+                        self.dirty = true;
+                    }
+                }
             });
         });
+        close
     }
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
@@ -1088,25 +1059,38 @@ impl App {
             egui::UiBuilder::new().max_rect(ERect::from_center_size(rect.center(), Vec2::new(460.0, 300.0))),
             |ui| {
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("Open a Lamina project").font(semibold(22.0)).color(TEXT));
+                    ui.label(egui::RichText::new("Open a board").font(semibold(22.0)).color(TEXT));
                     ui.add_space(6.0);
                     ui.label(
                         egui::RichText::new(
-                            "The viewer follows a project folder and redraws whenever the agent changes it. \
-                             Create one with the `open` tool (create: true) or `lamina new <dir>`.",
+                            "A Lamina project folder, or a KiCad, EasyEDA or Gerber file (imported on the fly). \
+                             The viewer redraws whenever the agent changes the board. Ctrl+O also opens a file, \
+                             and folders or files can be dropped on the window.",
                         )
                         .font(body(13.5))
                         .color(TEXT_2),
                     );
                     ui.add_space(14.0);
-                    ui.add(
+                    ui.horizontal(|ui| {
+                        if widgets::primary_button(ui, "Open board file…", true) {
+                            self.request = Some(OpenRequest::PickFile);
+                        }
+                        ui.add_space(6.0);
+                        if ui.button("Open project folder…").clicked() {
+                            self.request = Some(OpenRequest::PickFolder);
+                        }
+                    });
+                    ui.add_space(10.0);
+                    let edit = ui.add(
                         egui::TextEdit::singleline(&mut self.open_path)
-                            .hint_text("C:\\path\\to\\project")
+                            .hint_text("or type a path and press Enter")
                             .desired_width(f32::INFINITY)
                             .font(mono(13.0)),
                     );
-                    ui.add_space(8.0);
-                    if widgets::primary_button(ui, "Open folder", !self.open_path.trim().is_empty()) {
+                    if edit.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        && !self.open_path.trim().is_empty()
+                    {
                         open = Some(PathBuf::from(self.open_path.trim()));
                     }
                     if let Some(e) = &self.error {
@@ -1116,8 +1100,9 @@ impl App {
                 });
             },
         );
+        let _ = ctx;
         if let Some(p) = open {
-            self.open(p, &ctx);
+            self.request = Some(OpenRequest::Path(p));
         }
     }
 
@@ -1153,6 +1138,21 @@ impl App {
             self.target = Some(t);
             self.dirty = true;
         }
+        // Window or pane resized while the view is as fitted: fit again.
+        if let Some((c, p, s)) = self.fit_2d_at {
+            if s != size_px && c == self.center && p == self.ppm {
+                self.fitted = false;
+            }
+        }
+        if let Some((cam, s)) = self.fit_3d_at {
+            let same = cam.target == self.cam.target
+                && cam.yaw == self.cam.yaw
+                && cam.pitch == self.cam.pitch
+                && cam.distance == self.cam.distance;
+            if s != size_px && same {
+                self.cam_fitted = false;
+            }
+        }
         if !self.fitted {
             self.fit_2d(size_px);
         }
@@ -1173,7 +1173,7 @@ impl App {
                 ),
             )
         });
-        let focus_free = !ui.ctx().egui_wants_keyboard_input();
+        let focus_free = self.focused && !ui.ctx().egui_wants_keyboard_input();
         if focus_free {
             if keys.1 {
                 self.mode = Mode::TwoD;
@@ -1471,34 +1471,512 @@ fn short_path(p: &Path) -> String {
     }
 }
 
-/// Env var telling a viewer its slot `i/n` when several boards are opened together.
-const TILE_ENV: &str = "LAMINA_VIEWER_TILE";
-
-fn tile_slot() -> Option<(usize, usize)> {
-    let v = std::env::var(TILE_ENV).ok()?;
-    let (i, n) = v.split_once('/')?;
-    let (i, n) = (i.parse().ok()?, n.parse().ok()?);
-    (n > 1 && i < n).then_some((i, n))
+/// The window: several boards side by side. Side panels, the status bar
+/// and keyboard shortcuts belong to the focused board.
+struct Shell {
+    boards: Vec<App>,
+    focus: usize,
+    three_d: bool,
+    add_path: String,
+    add_error: Option<(String, Instant)>,
+    /// File dialogs and imports running in the background.
+    jobs: Vec<Job>,
+    /// Project folders to open on the next frame.
+    pending_open: Vec<PathBuf>,
+    title: String,
+    remembered: Vec<PathBuf>,
+    panes_seen: usize,
 }
 
-impl App {
-    /// Side by side with the other windows opened in the same command.
-    fn place_tile(&mut self, ctx: &egui::Context) {
-        let Some((i, n)) = self.tile else { return };
-        let Some(m) = ctx.input(|inp| inp.viewport().monitor_size) else {
-            return;
+fn remembered_boards() -> Vec<PathBuf> {
+    config_file()
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .map(|s| {
+            s.lines()
+                .map(|l| PathBuf::from(l.trim()))
+                .filter(|p| ProjectData::is_project(p))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A dropped folder, or a file inside a project folder, as a project root.
+fn project_root(p: &Path) -> Option<PathBuf> {
+    if ProjectData::is_project(p) {
+        return Some(p.to_path_buf());
+    }
+    p.parent()
+        .filter(|d| ProjectData::is_project(d))
+        .map(Path::to_path_buf)
+}
+
+fn gpu_of(rs: Option<&egui_wgpu::RenderState>) -> Option<Gpu> {
+    rs.map(|rs| Gpu::new(rs.device.clone(), rs.queue.clone()))
+}
+
+impl Shell {
+    fn new(cc: &eframe::CreationContext<'_>, roots: Vec<PathBuf>, three_d: bool) -> Shell {
+        style::install(&cc.egui_ctx);
+        let roots = if roots.is_empty() {
+            remembered_boards()
+        } else {
+            roots
         };
-        self.tile = None;
-        let w = m.x / n as f32;
-        // Room for the title bar and the taskbar.
-        let h = m.y - 90.0;
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(
-            w * i as f32,
-            0.0,
-        )));
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w - 16.0, h)));
-        self.refit_at = Some(Instant::now() + Duration::from_millis(400));
-        ctx.request_repaint_after(Duration::from_millis(450));
+        let mut s = Shell {
+            boards: Vec::new(),
+            focus: 0,
+            three_d,
+            add_path: String::new(),
+            add_error: None,
+            jobs: Vec::new(),
+            pending_open: Vec::new(),
+            title: String::new(),
+            remembered: Vec::new(),
+            panes_seen: 0,
+        };
+        let rs = cc.wgpu_render_state.as_ref();
+        for r in roots {
+            s.add(r, &cc.egui_ctx, rs);
+        }
+        if s.boards.is_empty() {
+            s.boards
+                .push(App::new(gpu_of(rs), None, three_d, &cc.egui_ctx));
+        }
+        s.focus = 0;
+        s
+    }
+
+    fn add(&mut self, root: PathBuf, ctx: &egui::Context, rs: Option<&egui_wgpu::RenderState>) {
+        let abs = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+        if let Some(i) = self
+            .boards
+            .iter()
+            .position(|b| b.root.as_deref().map(abs) == Some(abs(&root)))
+        {
+            self.focus = i;
+            return;
+        }
+        let b = App::new(gpu_of(rs), Some(root), self.three_d, ctx);
+        // An empty placeholder pane gives way to the first real board.
+        if self.boards.len() == 1 && self.boards[0].root.is_none() {
+            self.boards.clear();
+        }
+        self.boards.push(b);
+        self.focus = self.boards.len() - 1;
+    }
+
+    fn close(&mut self, i: usize, rs: Option<&egui_wgpu::RenderState>, ctx: &egui::Context) {
+        let b = self.boards.remove(i);
+        if let (Some(id), Some(rs)) = (b.tex, rs) {
+            rs.renderer.write().free_texture(&id);
+        }
+        if self.boards.is_empty() {
+            self.boards
+                .push(App::new(gpu_of(rs), None, self.three_d, ctx));
+        }
+        self.focus = self.focus.min(self.boards.len() - 1);
+    }
+
+    /// Window title and the remembered board list follow what is open.
+    fn sync_title_and_memory(&mut self, ctx: &egui::Context) {
+        let names: Vec<String> = self
+            .boards
+            .iter()
+            .filter(|b| b.root.is_some())
+            .map(App::tab_name)
+            .collect();
+        let title = if names.is_empty() {
+            "Lamina".to_string()
+        } else {
+            format!("{} - Lamina", names.join(" · "))
+        };
+        if title != self.title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = title;
+        }
+        let roots: Vec<PathBuf> = self.boards.iter().filter_map(|b| b.root.clone()).collect();
+        if roots != self.remembered && !roots.is_empty() {
+            if let Some(f) = config_file() {
+                let _ = std::fs::create_dir_all(f.parent().unwrap());
+                let text: Vec<String> = roots.iter().map(|r| r.display().to_string()).collect();
+                let _ = std::fs::write(f, text.join("\n"));
+            }
+            self.remembered = roots;
+        }
+    }
+
+    fn top_bar(&mut self, ui: &mut egui::Ui, rs: Option<&egui_wgpu::RenderState>) {
+        let ctx = ui.ctx().clone();
+        let mut close = None;
+        ui.horizontal_centered(|ui| {
+            widgets::wordmark(ui);
+            ui.add_space(14.0);
+            let many = self.boards.len() > 1;
+            for (i, b) in self.boards.iter().enumerate() {
+                if b.root.is_none() {
+                    continue;
+                }
+                let text = egui::RichText::new(b.tab_name())
+                    .font(semibold(13.0))
+                    .color(if i == self.focus { TEXT } else { TEXT_2 });
+                let r = ui
+                    .add(egui::Button::selectable(i == self.focus && many, text))
+                    .on_hover_text(
+                        b.root
+                            .as_ref()
+                            .map(|r| r.display().to_string())
+                            .unwrap_or_default(),
+                    );
+                ui.painter().circle_filled(
+                    Pos2::new(r.rect.right() - 3.0, r.rect.top() + 4.0),
+                    2.5,
+                    b.health(),
+                );
+                if r.clicked() {
+                    self.focus = i;
+                }
+                if r.middle_clicked() {
+                    close = Some(i);
+                }
+                ui.add_space(2.0);
+            }
+            let mut req = None;
+            ui.menu_button(
+                egui::RichText::new("+").font(semibold(15.0)).color(TEXT_2),
+                |ui| {
+                    if ui.button("Open board file…    Ctrl+O").clicked() {
+                        req = Some(OpenRequest::PickFile);
+                        ui.close();
+                    }
+                    if ui.button("Open project folder…").clicked() {
+                        req = Some(OpenRequest::PickFolder);
+                        ui.close();
+                    }
+                    ui.separator();
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut self.add_path)
+                            .hint_text("path, then Enter")
+                            .desired_width(300.0)
+                            .font(mono(12.0)),
+                    );
+                    if edit.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        && !self.add_path.trim().is_empty()
+                    {
+                        req = Some(OpenRequest::Path(PathBuf::from(self.add_path.trim())));
+                        self.add_path.clear();
+                        ui.close();
+                    }
+                    let recent: Vec<PathBuf> = remembered_boards()
+                        .into_iter()
+                        .filter(|r| !self.boards.iter().any(|b| b.root.as_ref() == Some(r)))
+                        .collect();
+                    if !recent.is_empty() {
+                        ui.separator();
+                        ui.label(egui::RichText::new("Recent").font(body(11.5)).color(TEXT_3));
+                        for r in recent {
+                            if ui.button(short_path(&r)).clicked() {
+                                req = Some(OpenRequest::Path(r));
+                                ui.close();
+                            }
+                        }
+                    }
+                },
+            )
+            .response
+            .on_hover_text("Open another board next to this one. Files and folders can also be dropped on the window.");
+            if let Some(r) = req {
+                self.request(r, &ctx);
+            }
+            for j in &self.jobs {
+                ui.add(egui::Spinner::new().size(12.0));
+                ui.label(egui::RichText::new(&j.label).font(body(12.0)).color(TEXT_2));
+            }
+            if let Some((e, t)) = &self.add_error {
+                if t.elapsed() < Duration::from_secs(8) {
+                    ui.label(egui::RichText::new(e).font(body(12.0)).color(ERROR))
+                        .on_hover_text(e);
+                }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.boards[self.focus].chips(ui);
+            });
+        });
+        if let Some(i) = close {
+            self.close(i, rs, &ctx);
+        }
+    }
+}
+
+/// Something the user asked to open.
+pub(crate) enum OpenRequest {
+    PickFile,
+    PickFolder,
+    Path(PathBuf),
+}
+
+/// A file dialog or an import running off the UI thread.
+struct Job {
+    label: String,
+    rx: std::sync::mpsc::Receiver<JobDone>,
+}
+
+enum JobDone {
+    /// The dialog closed; `None` when cancelled.
+    Picked(Option<PathBuf>),
+    Opened(Result<PathBuf, String>),
+}
+
+impl Shell {
+    fn spawn(
+        &mut self,
+        label: String,
+        ctx: &egui::Context,
+        f: impl FnOnce() -> JobDone + Send + 'static,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+            ctx.request_repaint();
+        });
+        self.jobs.push(Job { label, rx });
+    }
+
+    fn request(&mut self, r: OpenRequest, ctx: &egui::Context) {
+        match r {
+            OpenRequest::PickFile => self.spawn(String::new(), ctx, || {
+                JobDone::Picked(
+                    rfd::FileDialog::new()
+                        .set_title("Open a board")
+                        .add_filter(
+                            "Boards",
+                            &["json", "kicad_pcb", "zip", "gbr", "gtl", "gbl", "drl"],
+                        )
+                        .add_filter("Lamina project (board.json)", &["json"])
+                        .add_filter("KiCad board", &["kicad_pcb"])
+                        .add_filter("EasyEDA board", &["json"])
+                        .add_filter("Gerbers", &["zip", "gbr", "gtl", "gbl", "drl"])
+                        .add_filter("All files", &["*"])
+                        .pick_file(),
+                )
+            }),
+            OpenRequest::PickFolder => self.spawn(String::new(), ctx, || {
+                JobDone::Picked(
+                    rfd::FileDialog::new()
+                        .set_title("Open a Lamina project or Gerber folder")
+                        .pick_folder(),
+                )
+            }),
+            OpenRequest::Path(p) => {
+                if let Some(r) = project_root(&p) {
+                    // A project, or a file inside one: no import needed.
+                    if lamina_core::board_file_kind(&p).is_none()
+                        || ProjectData::is_project(&p)
+                        || p.file_name().is_some_and(|n| n == "board.json")
+                    {
+                        self.open_root(r, ctx);
+                        return;
+                    }
+                }
+                if lamina_core::board_file_kind(&p).is_none() {
+                    self.add_error = Some((
+                        format!("{} is not a Lamina project or a board file", p.display()),
+                        Instant::now(),
+                    ));
+                    return;
+                }
+                let name = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                self.spawn(format!("Importing {name}…"), ctx, move || {
+                    JobDone::Opened(
+                        lamina_core::open_board_path(&p)
+                            .map(|(dir, _)| dir)
+                            .map_err(|e| e.to_string()),
+                    )
+                });
+            }
+        }
+    }
+
+    fn open_root(&mut self, r: PathBuf, ctx: &egui::Context) {
+        self.pending_open.push(r);
+        ctx.request_repaint();
+    }
+
+    fn finish_jobs(&mut self, ctx: &egui::Context, rs: Option<&egui_wgpu::RenderState>) {
+        let mut done = Vec::new();
+        self.jobs.retain(|j| match j.rx.try_recv() {
+            Ok(d) => {
+                done.push(d);
+                false
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+        });
+        for d in done {
+            match d {
+                JobDone::Picked(Some(p)) => self.request(OpenRequest::Path(p), ctx),
+                JobDone::Picked(None) => {}
+                JobDone::Opened(Ok(dir)) => self.add(dir, ctx, rs),
+                JobDone::Opened(Err(e)) => self.add_error = Some((e, Instant::now())),
+            }
+        }
+        for r in std::mem::take(&mut self.pending_open) {
+            self.add(r, ctx, rs);
+        }
+    }
+}
+
+impl eframe::App for Shell {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        let rs = frame.wgpu_render_state().cloned();
+        for b in &mut self.boards {
+            b.poll();
+        }
+        // Folders dropped on the window open next to the others.
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .collect()
+        });
+        for p in dropped {
+            self.request(OpenRequest::Path(p), &ctx);
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::O)) {
+            self.request(OpenRequest::PickFile, &ctx);
+        }
+        self.finish_jobs(&ctx, rs.as_ref());
+        let asked: Vec<OpenRequest> = self
+            .boards
+            .iter_mut()
+            .filter_map(|b| b.request.take())
+            .collect();
+        for r in asked {
+            self.request(r, &ctx);
+        }
+        // A new pane layout changes every canvas size: fit them again.
+        if self.boards.len() != self.panes_seen {
+            self.panes_seen = self.boards.len();
+            for b in &mut self.boards {
+                b.fitted = false;
+                b.cam_fitted = false;
+            }
+        }
+        for (i, b) in self.boards.iter_mut().enumerate() {
+            b.focused = i == self.focus;
+        }
+
+        egui::Panel::top("top")
+            .exact_size(44.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(PANEL)
+                    .inner_margin(egui::Margin::symmetric(14, 0)),
+            )
+            .show(ui, |ui| self.top_bar(ui, rs.as_ref()));
+        let f = self.focus;
+        egui::Panel::bottom("status")
+            .exact_size(26.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(PANEL)
+                    .inner_margin(egui::Margin::symmetric(14, 0)),
+            )
+            .show(ui, |ui| self.boards[f].status_bar(ui));
+        if self.boards[f].loaded.is_some() {
+            egui::Panel::left("layers")
+                .exact_size(236.0)
+                .resizable(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(PANEL)
+                        .inner_margin(egui::Margin::same(12)),
+                )
+                .show(ui, |ui| self.boards[f].layer_panel(ui));
+            egui::Panel::right("inspector")
+                .default_size(312.0)
+                .size_range(260.0..=520.0)
+                .resizable(true)
+                .frame(
+                    egui::Frame::new()
+                        .fill(PANEL)
+                        .inner_margin(egui::Margin::same(12)),
+                )
+                .show(ui, |ui| self.boards[f].inspector(ui));
+        }
+        let mut close = None;
+        egui::CentralPanel::no_frame().show(ui, |ui| {
+            let area = ui.max_rect();
+            let n = self.boards.len();
+            let gap = if n > 1 { 2.0 } else { 0.0 };
+            let w = (area.width() - gap * (n as f32 - 1.0)) / n as f32;
+            let header = 34.0;
+            let (pressed, press_at) =
+                ctx.input(|i| (i.pointer.any_pressed(), i.pointer.press_origin()));
+            for (i, b) in self.boards.iter_mut().enumerate() {
+                let x = area.left() + i as f32 * (w + gap);
+                let pane =
+                    ERect::from_min_size(Pos2::new(x, area.top()), Vec2::new(w, area.height()));
+                if pressed && press_at.is_some_and(|p| pane.contains(p)) {
+                    self.focus = i;
+                }
+                let head = ERect::from_min_size(pane.min, Vec2::new(w, header));
+                let body_r = ERect::from_min_max(Pos2::new(pane.left(), head.bottom()), pane.max);
+                ui.painter().rect_filled(head, 0.0, PANEL);
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(head)
+                        .id_salt(("pane-head", i)),
+                    |ui| {
+                        if b.pane_header(ui, n > 1) {
+                            close = Some(i);
+                        }
+                    },
+                );
+                ui.scope_builder(
+                    egui::UiBuilder::new().max_rect(body_r).id_salt(("pane", i)),
+                    |ui| {
+                        if b.loaded.is_some() {
+                            if let Some(rs) = &rs {
+                                b.canvas(ui, rs);
+                            }
+                        } else {
+                            b.empty_state(ui);
+                        }
+                    },
+                );
+                if n > 1 && i == self.focus {
+                    ui.painter().rect_stroke(
+                        pane.shrink(0.5),
+                        0.0,
+                        Stroke::new(1.0, ACCENT.gamma_multiply(0.7)),
+                        StrokeKind::Inside,
+                    );
+                }
+            }
+        });
+        if let Some(i) = close {
+            self.close(i, rs.as_ref(), &ctx);
+        }
+        self.sync_title_and_memory(&ctx);
+
+        let mut animating = false;
+        let mut recent = false;
+        for b in &mut self.boards {
+            animating |= b.animating();
+            recent |= b.recently_reloaded();
+        }
+        if animating || !self.jobs.is_empty() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        } else if recent {
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
     }
 }
 
@@ -1518,8 +1996,9 @@ fn attach_console() {
 
 const USAGE: &str = "Usage: lamina-viewer [--3d] [BOARD_DIR]...
 
-Opens a window on each Lamina project folder (one window per folder),
-side by side. Without a folder it reopens the last one.
+Opens the Lamina project folders side by side in one window. Without a
+folder it reopens the boards that were open last time. More boards open
+with + in the top bar or by dropping a folder on the window.
 
   --3d  start in the 3D view";
 
@@ -1546,40 +2025,18 @@ fn main() -> eframe::Result<()> {
         );
         std::process::exit(2);
     }
-    // One process per board: the first here, the rest as their own windows.
-    if args.len() > 1 {
-        if let Ok(exe) = std::env::current_exe() {
-            for (i, a) in args.iter().enumerate().skip(1) {
-                let mut cmd = std::process::Command::new(&exe);
-                if three_d {
-                    cmd.arg("--3d");
-                }
-                let spawned = cmd
-                    .arg(a)
-                    .env(TILE_ENV, format!("{i}/{}", args.len()))
-                    .spawn();
-                if let Err(e) = spawned {
-                    eprintln!("could not open {a}: {e}");
-                }
-            }
-        }
-    }
-    if args.len() > 1 {
-        // SAFETY: single-threaded here, before any window or worker starts.
-        unsafe { std::env::set_var(TILE_ENV, format!("0/{}", args.len())) };
-    }
-    let root = args.first().map(PathBuf::from);
+    let roots: Vec<PathBuf> = args.iter().map(PathBuf::from).collect();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Lamina")
             .with_inner_size([1480.0, 920.0])
-            .with_min_inner_size([640.0, 480.0]),
+            .with_min_inner_size([760.0, 480.0]),
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
     eframe::run_native(
         "Lamina",
         options,
-        Box::new(move |cc| Ok(Box::new(App::new(cc, root, three_d)))),
+        Box::new(move |cc| Ok(Box::new(Shell::new(cc, roots, three_d)))),
     )
 }

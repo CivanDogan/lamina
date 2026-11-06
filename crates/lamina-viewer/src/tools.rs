@@ -707,7 +707,8 @@ impl App {
     }
 
     fn keys(&mut self, ui: &egui::Ui, size_px: Vec2) {
-        if ui.ctx().egui_wants_keyboard_input() {
+        // With several boards open, only the focused one takes shortcuts.
+        if !self.focused || ui.ctx().egui_wants_keyboard_input() {
             return;
         }
         let k = |key: Key| ui.input(|i| i.key_pressed(key));
