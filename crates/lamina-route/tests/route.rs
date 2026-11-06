@@ -86,3 +86,45 @@ fn skip_nets() {
     let out = autoroute(&d, &opt).unwrap();
     assert!(out.tracks.iter().all(|t| t.net != "A"));
 }
+
+#[test]
+fn crossing_bus_is_negotiated_clean() {
+    // Two SOIC-8s side by side, pin k of U1 to pin k of U2: the nets from
+    // U1's far row must cross the others, so the router needs vias and
+    // negotiation to finish without shorts.
+    let mut d = ProjectData::new("x");
+    d.board.outline = Some(Contour::rect(0.0, 0.0, 30.0, 20.0));
+    let fp = from_package("SOIC-8", &Options::default(), None).unwrap();
+    d.footprints.insert(fp.id.clone(), fp);
+    for (r, x) in [("U1", 8.0), ("U2", 22.0)] {
+        d.parts.parts.insert(r.into(), Part::new("SOIC-8"));
+        d.placement
+            .placements
+            .insert(r.into(), Placement::at(x, 10.0));
+    }
+    for k in 1..=8 {
+        d.nets.nets.insert(
+            format!("N{k}"),
+            Net {
+                pads: vec![
+                    format!("U1.{k}").parse().unwrap(),
+                    format!("U2.{k}").parse().unwrap(),
+                ],
+                class: None,
+            },
+        );
+    }
+    let out = autoroute(&d, &RouteOptions::default()).unwrap();
+    assert!(out.failed.is_empty(), "{:?}", out.failed);
+    assert!(!out.vias.is_empty());
+    d.routing.tracks.extend(out.tracks);
+    d.routing.vias.extend(out.vias);
+    let a = lamina_drc::analyze(&d);
+    assert!(a.ratsnest.is_empty(), "{:?}", a.ratsnest);
+    let errors: Vec<_> = a
+        .violations
+        .iter()
+        .filter(|v| v.severity == Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+}
