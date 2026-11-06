@@ -721,16 +721,8 @@ impl App {
         let (shift, cmd) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
 
         if cmd {
-            if k(Key::Z) && !shift {
-                self.undo();
-            } else if k(Key::Y) || (k(Key::Z) && shift) {
-                self.redo();
-            } else if k(Key::F) {
-                self.find = Some(crate::actions::Find {
-                    just_opened: true,
-                    ..Default::default()
-                });
-            } else if k(Key::A) {
+            // Undo, redo and find work in both views: see `global_keys`.
+            if k(Key::A) {
                 if let Some(l) = &self.loaded {
                     self.sel = l
                         .data
@@ -743,9 +735,6 @@ impl App {
                 }
             }
             return;
-        }
-        if k(Key::F1) {
-            self.help = !self.help;
         }
         if self.help || self.find.is_some() {
             return;
@@ -897,6 +886,31 @@ impl App {
                     self.commit(move |d| edits::move_parts(d, &refs, dx, dy));
                 }
             }
+        }
+    }
+
+    /// Shortcuts that work in 2D and 3D alike.
+    pub(crate) fn global_keys(&mut self, ui: &egui::Ui) {
+        if !self.focused || ui.ctx().egui_wants_keyboard_input() {
+            return;
+        }
+        let k = |key: Key| ui.input(|i| i.key_pressed(key));
+        let (shift, cmd) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
+        if k(Key::F1) {
+            self.help = !self.help;
+        }
+        if !cmd {
+            return;
+        }
+        if k(Key::Z) && !shift {
+            self.undo();
+        } else if k(Key::Y) || (k(Key::Z) && shift) {
+            self.redo();
+        } else if k(Key::F) {
+            self.find = Some(crate::actions::Find {
+                just_opened: true,
+                ..Default::default()
+            });
         }
     }
 

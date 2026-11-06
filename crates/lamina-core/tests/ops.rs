@@ -608,6 +608,10 @@ fn kicad_board_models_fall_back_and_resolve_project_paths() {
     (model "${KICAD10_3DMODEL_DIR}/Nope.3dshapes/Missing.step")
     (model "${KIPRJMOD}/models/hidden.step" (hide yes))
     (model "${KIPRJMOD}/models/body.step" (offset (xyz 0 0 1))))
+  (footprint "Lib:Part2" (layer "F.Cu") (at 15 10)
+    (property "Reference" "J2" (at 0 0) (layer "F.SilkS") (effects (font (size 1 1))))
+    (pad "1" smd rect (at 0 0) (size 1.2 1) (layers "F.Cu" "F.Paste" "F.Mask"))
+    (model "models/body.step"))
   (footprint "Lib:Hole" (layer "F.Cu") (at 3 3)
     (property "Reference" "H1" (at 0 0) (layer "F.SilkS") (effects (font (size 1 1))))
     (pad "" np_thru_hole circle (at 0 0) (size 3.2 3.2) (drill 3.2) (layers "*.Cu" "*.Mask"))))
@@ -625,7 +629,7 @@ fn kicad_board_models_fall_back_and_resolve_project_paths() {
         })
         .unwrap();
     assert!(
-        r.notes.iter().any(|n| n == "3D models: 1 of 1 resolved"),
+        r.notes.iter().any(|n| n == "3D models: 2 of 2 resolved"),
         "{:?}",
         r.notes
     );
@@ -633,6 +637,9 @@ fn kicad_board_models_fall_back_and_resolve_project_paths() {
     let m = fp.model.as_ref().expect("project model used");
     assert_eq!(m.file, "kicad/models/body.step");
     assert_eq!(m.offset, [0.0, 0.0, 1.0]);
+    // A relative path without a variable is read from the KiCad project too.
+    let fp2 = &p.data.footprints[&p.data.parts.parts["J2"].footprint];
+    assert!(fp2.model.is_some());
     // The mounting hole has no body and is not drawn as a box.
     let hole = &p.data.footprints[&p.data.parts.parts["H1"].footprint];
     assert!(!hole.has_body());

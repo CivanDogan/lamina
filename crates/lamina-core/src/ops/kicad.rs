@@ -143,10 +143,13 @@ impl Project {
             .unwrap_or_else(|| (fp_library.to_string(), fp_name.to_string()));
         let rel = format!("kicad/{lib}/{name}.step");
         let dst = self.root().join(MODEL_DIR).join(&rel);
-        // `${KIPRJMOD}` is the KiCad project folder; such files are never online.
-        let in_project = m.path.starts_with("${KIPRJMOD}");
+        // `${KIPRJMOD}` is the KiCad project folder, and so is the base of a
+        // relative path without a variable. Such files are never online, and
+        // they are copied again on every import since the user may edit them.
+        let in_project = m.path.starts_with("${KIPRJMOD}")
+            || (!m.path.starts_with("${") && !Path::new(&m.path).is_absolute());
         let online = online && !in_project;
-        if !dst.is_file() {
+        if !dst.is_file() || in_project {
             let mut roots = model_dirs(self.root());
             if in_project {
                 roots = project_dir.map(Path::to_path_buf).into_iter().collect();

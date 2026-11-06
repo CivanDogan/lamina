@@ -190,8 +190,10 @@ pub fn resolve_model(roots: &[PathBuf], kicad_path: &str) -> Option<PathBuf> {
             }
         }
     }
+    // Only an absolute path stands on its own; a relative one would depend
+    // on the current directory.
     let direct = PathBuf::from(&rel);
-    direct.is_file().then_some(direct)
+    (direct.is_absolute() && direct.is_file()).then_some(direct)
 }
 
 /// Where footprints and models can be fetched from when they are not local.

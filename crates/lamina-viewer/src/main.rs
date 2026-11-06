@@ -1195,6 +1195,7 @@ impl App {
             )
         });
         let focus_free = self.focused && !ui.ctx().egui_wants_keyboard_input();
+        self.global_keys(ui);
         if focus_free {
             if keys.1 {
                 self.mode = Mode::TwoD;
@@ -1359,25 +1360,44 @@ impl App {
             self.measure_overlay(&painter, &xf);
             widgets::hint(&painter, rect, self.tool_hint());
             self.toolbar(ui, rect);
-            if let Some((msg, ok, t)) = &self.toast {
-                let age = t.elapsed().as_secs_f32();
-                if age < 4.0 {
-                    let a = if age > 3.4 { (4.0 - age) / 0.6 } else { 1.0 };
-                    widgets::toast(
-                        &painter,
-                        Pos2::new(rect.center().x, rect.top() + 72.0),
-                        msg,
-                        if *ok { OK } else { ERROR },
-                        a,
-                    );
-                }
-            }
         } else {
             widgets::hint(
                 &painter,
                 rect,
                 "Drag to orbit · right-drag to pan · scroll to zoom · F to fit",
             );
+            // The Board menu works from 3D too.
+            let bar = ERect::from_min_size(
+                rect.left_top() + Vec2::new(12.0, 12.0),
+                Vec2::new(200.0, 36.0),
+            );
+            let mut b = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(bar)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            egui::Frame::new()
+                .fill(RAISED.gamma_multiply(0.97))
+                .stroke(Stroke::new(1.0, HAIRLINE))
+                .corner_radius(CornerRadius::same(9))
+                .inner_margin(egui::Margin::symmetric(8, 6))
+                .show(&mut b, |ui| self.board_menu(ui));
+        }
+        // Toasts show in both views. A "…" message stays while its work runs.
+        let working = self.editor.as_ref().is_some_and(|e| e.busy > 0) || !self.bg.is_empty();
+        if let Some((msg, ok, t)) = &self.toast {
+            let held = working && msg.ends_with('…');
+            let age = if held { 0.0 } else { t.elapsed().as_secs_f32() };
+            if age < 4.0 {
+                let a = if age > 3.4 { (4.0 - age) / 0.6 } else { 1.0 };
+                widgets::toast(
+                    &painter,
+                    Pos2::new(rect.center().x, rect.top() + 72.0),
+                    msg,
+                    if *ok { OK } else { ERROR },
+                    a,
+                );
+            }
         }
     }
 
