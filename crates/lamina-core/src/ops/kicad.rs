@@ -136,14 +136,22 @@ impl Project {
         fp_name: &str,
         m: &lamina_kicad::KicadModel,
         online: bool,
+        project_dir: Option<&Path>,
         notes: &mut Vec<String>,
     ) -> Option<(ModelRef, Option<f64>)> {
         let (lib, name) = library::model_lib_name(&m.path)
             .unwrap_or_else(|| (fp_library.to_string(), fp_name.to_string()));
         let rel = format!("kicad/{lib}/{name}.step");
         let dst = self.root().join(MODEL_DIR).join(&rel);
+        // `${KIPRJMOD}` is the KiCad project folder; such files are never online.
+        let in_project = m.path.starts_with("${KIPRJMOD}");
+        let online = online && !in_project;
         if !dst.is_file() {
-            let local = library::resolve_model(&model_dirs(self.root()), &m.path);
+            let mut roots = model_dirs(self.root());
+            if in_project {
+                roots = project_dir.map(Path::to_path_buf).into_iter().collect();
+            }
+            let local = library::resolve_model(&roots, &m.path);
             match local {
                 Some(src)
                     if src.extension().is_some_and(|e| {
@@ -214,6 +222,39 @@ impl Project {
         }
     }
 
+    /// The first of a footprint's models that resolves: every model locally
+    /// first, then online. Notes of the failed tries are kept only when none
+    /// resolves.
+    fn resolve_kicad_models(
+        &self,
+        fp_library: &str,
+        fp_name: &str,
+        models: &[lamina_kicad::KicadModel],
+        online: bool,
+        project_dir: Option<&Path>,
+        notes: &mut Vec<String>,
+    ) -> Option<(ModelRef, Option<f64>)> {
+        let mut tries = Vec::new();
+        let passes: &[bool] = if online { &[false, true] } else { &[false] };
+        for &net in passes {
+            for m in models {
+                let mut n = Vec::new();
+                if let Some(r) =
+                    self.resolve_kicad_model(fp_library, fp_name, m, net, project_dir, &mut n)
+                {
+                    notes.extend(n);
+                    return Some(r);
+                }
+                if net || !online {
+                    tries.extend(n);
+                }
+            }
+        }
+        tries.dedup();
+        notes.extend(tries);
+        None
+    }
+
     pub fn import_kicad_footprint(&mut self, p: ImportKicadFootprint) -> Result<OpResult> {
         let spec = p.footprint.trim();
         let as_path = Path::new(spec);
@@ -272,10 +313,22 @@ impl Project {
             ));
         } else {
             if p.model {
-                if let Some(m) = &inst.model {
-                    if let Some((mr, h)) =
-                        self.resolve_kicad_model(&inst.library, &inst.name, m, p.online, &mut notes)
-                    {
+                if !inst.models.is_empty() {
+                    // A footprint file's project is the folder above its `.pretty`.
+                    let dir = as_path.parent().filter(|_| as_path.is_file()).map(|d| {
+                        match d.extension() {
+                            Some(e) if e == "pretty" => d.parent().unwrap_or(d),
+                            _ => d,
+                        }
+                    });
+                    if let Some((mr, h)) = self.resolve_kicad_models(
+                        &inst.library,
+                        &inst.name,
+                        &inst.models,
+                        p.online,
+                        dir,
+                        &mut notes,
+                    ) {
                         fp.model = Some(mr);
                         fp.height = h;
                     }
@@ -343,6 +396,14 @@ impl Project {
         let mut notes = imported.notes;
         let mut d = imported.data;
         d.notes = self.data.notes.clone();
+        // KiCad 6+ keeps rules and net classes in the project file beside the board.
+        let pro = path.with_extension("kicad_pro");
+        if let Ok(text) = std::fs::read_to_string(&pro) {
+            match lamina_kicad::apply_project(&mut d, &text) {
+                Ok(n) => notes.extend(n),
+                Err(e) => notes.push(format!("{}: {e}", pro.display())),
+            }
+        }
         if p.models {
             let mut found = 0;
             for (fp_id, m) in &imported.models {
@@ -357,7 +418,7 @@ impl Project {
                 };
                 let mut mnotes = Vec::new();
                 if let Some((mr, h)) =
-                    self.resolve_kicad_model(&lib, &fname, m, p.online, &mut mnotes)
+                    self.resolve_kicad_models(&lib, &fname, m, p.online, path.parent(), &mut mnotes)
                 {
                     let fp = d.footprints.get_mut(fp_id).unwrap();
                     fp.model = Some(mr);

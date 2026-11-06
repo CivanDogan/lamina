@@ -150,7 +150,7 @@ impl Project {
             let missing: Vec<&str> = s3
                 .instances
                 .iter()
-                .filter(|i| i.model.is_none())
+                .filter(|i| i.model.is_none() && i.placeholder.is_some())
                 .map(|i| i.refdes.as_str())
                 .collect();
             if !missing.is_empty() {

@@ -26,7 +26,8 @@ pub struct Instance {
     pub exclude_from_bom: bool,
     /// Pad number to net name, from a board file.
     pub pad_nets: Vec<(String, String)>,
-    pub model: Option<KicadModel>,
+    /// Shown 3D models in file order; the first that resolves is used.
+    pub models: Vec<KicadModel>,
     pub notes: Vec<String>,
 }
 
@@ -147,7 +148,7 @@ pub fn convert(node: &Sx, library_hint: &str, origin: &str) -> Result<Instance, 
     let mut value = None;
     let mut properties = BTreeMap::new();
     let mut pad_nets = Vec::new();
-    let mut model = None;
+    let mut models = Vec::new();
     let mut dnp = false;
     let mut exclude_from_bom = false;
     let mut skipped: BTreeMap<String, usize> = BTreeMap::new();
@@ -243,8 +244,10 @@ pub fn convert(node: &Sx, library_hint: &str, origin: &str) -> Result<Instance, 
                 Err(e) => notes.push(format!("pad {} skipped: {e}", item.arg(0).unwrap_or("?"))),
             },
             "model" => {
-                if model.is_none() {
-                    model = model_from(item);
+                let hidden = item.child("hide").is_some_and(|h| h.arg(0) != Some("no"))
+                    || item.args().iter().any(|a| a.text() == Some("hide"));
+                if !hidden {
+                    models.extend(model_from(item));
                 }
             }
             "zone" => *skipped.entry("footprint zones".into()).or_default() += 1,
@@ -274,7 +277,7 @@ pub fn convert(node: &Sx, library_hint: &str, origin: &str) -> Result<Instance, 
         dnp,
         exclude_from_bom,
         pad_nets,
-        model,
+        models,
         notes,
     })
 }
@@ -726,7 +729,7 @@ mod tests {
                 .iter()
                 .any(|t| t.text == "${ref}" && t.layer == FpLayer::Silk && t.at.y > 0.0)
         );
-        let m = i.model.unwrap();
+        let m = &i.models[0];
         assert!(m.path.ends_with("R_0603_1608Metric.step"));
         assert!(i.notes.is_empty(), "{:?}", i.notes);
     }

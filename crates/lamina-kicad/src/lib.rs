@@ -6,9 +6,11 @@ pub mod footprint;
 pub mod layers;
 pub mod library;
 pub mod pcb;
+pub mod project;
 
 pub use lamina_model::sexpr;
 
 pub use footprint::{Instance, KicadModel, convert, footprint_id, parse_footprint};
 pub use library::{DirSource, Hit, HttpSource, KicadSource};
 pub use pcb::{ImportedBoard, export_board, export_board_with, import_board};
+pub use project::apply_project;

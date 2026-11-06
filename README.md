@@ -50,8 +50,11 @@ for ground, `check`, `render`, `export`. Read the user's comments with `notes`.
 ## Viewer
 
 ```
-lamina-viewer <project folder>
+lamina-viewer [--3d] <project folder>...
 ```
+
+Several folders open side by side, one window each; `--3d` starts in the 3D
+view.
 
 The viewer watches the folder and redraws whenever files change, and it edits
 the board the way KiCad does: click to select, drag to move, box-select,
@@ -137,7 +140,10 @@ Lamina reads and writes KiCad's formats without running KiCad:
   `search_kicad_footprints` searches the local ones.
 - `import_kicad_board` / `lamina import-kicad <file> <dir>` read a
   `.kicad_pcb` (KiCad 6 to 10): outline, footprints, parts, nets, placement,
-  tracks, vias, zones, keep-outs and texts.
+  tracks, vias, zones, keep-outs and texts. Design rules and net classes come
+  from the `.kicad_pro` next to it. Of a footprint's 3D models the first one
+  found is used; `${KIPRJMOD}` paths are looked up next to the board, and
+  `--online` fetches the rest from the official libraries.
 - `export_kicad` / `lamina export-kicad <dir>` write a `.kicad_pcb` that KiCad
   8 or newer opens; KiCad refills the zones.
 

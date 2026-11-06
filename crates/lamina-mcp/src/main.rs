@@ -348,12 +348,12 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Cmd::Status { dir } => {
-            let p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
+            let p = server::read_project(&dir.to_string_lossy())?;
             println!("{}", serde_json::to_string_pretty(&p.status())?);
             Ok(())
         }
         Cmd::Check { dir } => {
-            let p = server::open_project(&dir.to_string_lossy(), false, None, false)?;
+            let p = server::read_project(&dir.to_string_lossy())?;
             println!("{}", serde_json::to_string_pretty(&p.check())?);
             Ok(())
         }

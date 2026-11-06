@@ -385,43 +385,66 @@ pub fn build(d: &ProjectData) -> BoardGeometry {
 
 /// Courtyard polygon of a placed part (footprint courtyard rect or polygon).
 pub fn courtyard(fp: &Footprint, pl: &Placement) -> Option<Vec<Point>> {
-    let cy = fp
+    let corners = |r: Rect| {
+        vec![
+            r.min,
+            Point::new(r.max.x, r.min.y),
+            r.max,
+            Point::new(r.min.x, r.max.y),
+        ]
+    };
+    // Courtyards are often drawn as loose lines and arcs: chain them.
+    let edges: Vec<Edge> = fp
         .graphics
         .iter()
-        .find(|g| g.layer == FpLayer::Courtyard)
-        .map(|g| match &g.shape {
-            Shape::Rect { min, max } => vec![
-                *min,
-                Point::new(max.x, min.y),
-                *max,
-                Point::new(min.x, max.y),
-            ],
-            Shape::Polygon { points } => points.clone(),
-            other => {
-                let r = Rect::from_points(other.points()).unwrap();
-                vec![
-                    r.min,
-                    Point::new(r.max.x, r.min.y),
-                    r.max,
-                    Point::new(r.min.x, r.max.y),
-                ]
-            }
-        })
-        .or_else(|| {
-            fp.courtyard_bbox().map(|r| {
-                vec![
-                    r.min,
-                    Point::new(r.max.x, r.min.y),
-                    r.max,
-                    Point::new(r.min.x, r.max.y),
-                ]
-            })
-        })?;
+        .filter(|g| g.layer == FpLayer::Courtyard)
+        .flat_map(|g| edges_of(&g.shape))
+        .collect();
+    let (loops, _) = chain_edges(edges, 0.05);
+    let cy = match loops.len() {
+        0 => corners(fp.courtyard_bbox()?),
+        1 => loops[0].flatten(0.02),
+        // Several pieces: their convex hull.
+        _ => convex_hull(loops.iter().flat_map(|c| c.flatten(0.02)).collect()),
+    };
+    if cy.len() < 3 {
+        return fp
+            .courtyard_bbox()
+            .map(|r| corners(r).into_iter().map(|p| pl.transform(p)).collect());
+    }
     let mut pts: Vec<Point> = cy.into_iter().map(|p| pl.transform(p)).collect();
     if crate::prim::ring_area(&pts) < 0.0 {
         pts.reverse();
     }
     Some(pts)
+}
+
+/// Convex hull, counter-clockwise (monotone chain).
+pub fn convex_hull(mut pts: Vec<Point>) -> Vec<Point> {
+    pts.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+    pts.dedup_by(|a, b| a.dist(*b) < 1e-9);
+    if pts.len() < 3 {
+        return pts;
+    }
+    let cross =
+        |o: Point, a: Point, b: Point| (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    let mut h: Vec<Point> = Vec::with_capacity(pts.len() * 2);
+    for pass in 0..2 {
+        let start = h.len();
+        let it: Box<dyn Iterator<Item = &Point>> = if pass == 0 {
+            Box::new(pts.iter())
+        } else {
+            Box::new(pts.iter().rev())
+        };
+        for &p in it {
+            while h.len() >= start + 2 && cross(h[h.len() - 2], h[h.len() - 1], p) <= 0.0 {
+                h.pop();
+            }
+            h.push(p);
+        }
+        h.pop();
+    }
+    h
 }
 
 /// Footprint keep-outs of a placed part: (copper layer indices, outline, forbid).
@@ -452,4 +475,79 @@ pub fn part_keepouts(
             (ls, pts, k.forbid)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod courtyard_tests {
+    use super::*;
+
+    fn fp(shapes: Vec<Shape>) -> Footprint {
+        let mut f = Footprint::new(
+            "x",
+            Provenance::Datasheet {
+                document: "t".into(),
+                page: None,
+                url: None,
+            },
+        );
+        f.graphics = shapes
+            .into_iter()
+            .map(|shape| FpGraphic {
+                layer: FpLayer::Courtyard,
+                shape,
+                width: 0.05,
+                filled: false,
+            })
+            .collect();
+        f
+    }
+
+    fn area(p: &[Point]) -> f64 {
+        crate::prim::ring_area(p)
+    }
+
+    #[test]
+    fn loose_lines_make_one_l_shaped_courtyard() {
+        let l = |a: (f64, f64), b: (f64, f64)| Shape::Line {
+            a: Point::new(a.0, a.1),
+            b: Point::new(b.0, b.1),
+        };
+        // An L: 4 x 2 with a 2 x 2 block on top of its left half.
+        let f = fp(vec![
+            l((0.0, 0.0), (4.0, 0.0)),
+            l((4.0, 0.0), (4.0, 2.0)),
+            l((2.0, 4.0), (0.0, 4.0)),
+            l((4.0, 2.0), (2.0, 2.0)),
+            l((2.0, 2.0), (2.0, 4.0)),
+            l((0.0, 4.0), (0.0, 0.0)),
+        ]);
+        let c = courtyard(&f, &Placement::at(0.0, 0.0)).unwrap();
+        assert!((area(&c) - 12.0).abs() < 1e-6, "{c:?}");
+    }
+
+    #[test]
+    fn round_courtyard_is_round() {
+        let f = fp(vec![Shape::Circle {
+            center: Point::new(0.0, 0.0),
+            radius: 3.45,
+        }]);
+        let c = courtyard(&f, &Placement::at(0.0, 0.0)).unwrap();
+        let want = std::f64::consts::PI * 3.45 * 3.45;
+        assert!((area(&c) - want).abs() < 0.4, "{}", area(&c));
+        // A corner of the bounding square is outside.
+        assert!(!c.iter().any(|p| p.x > 3.0 && p.y > 3.0));
+    }
+
+    #[test]
+    fn hull_of_scattered_points() {
+        let h = convex_hull(vec![
+            Point::new(0.0, 0.0),
+            Point::new(2.0, 0.0),
+            Point::new(1.0, 1.0),
+            Point::new(2.0, 2.0),
+            Point::new(0.0, 2.0),
+        ]);
+        assert_eq!(h.len(), 4);
+        assert!((area(&h) - 4.0).abs() < 1e-9);
+    }
 }

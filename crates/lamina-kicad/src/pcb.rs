@@ -12,8 +12,9 @@ use lamina_model::sexpr::{self, Node, Sx, n};
 #[derive(Debug)]
 pub struct ImportedBoard {
     pub data: ProjectData,
-    /// Footprint id to its KiCad 3D model, for the caller to resolve.
-    pub models: BTreeMap<String, KicadModel>,
+    /// Footprint id to its shown KiCad 3D models, for the caller to
+    /// resolve (the first that resolves is used).
+    pub models: BTreeMap<String, Vec<KicadModel>>,
     pub notes: Vec<String>,
 }
 
@@ -134,8 +135,10 @@ pub fn import_board(src: &str, name: &str) -> Result<ImportedBoard, String> {
         }
         // Footprint definition, shared when identical.
         let fp_id = register_footprint(&mut d, inst.footprint.clone());
-        if let Some(m) = &inst.model {
-            models.entry(fp_id.clone()).or_insert_with(|| m.clone());
+        if !inst.models.is_empty() {
+            models
+                .entry(fp_id.clone())
+                .or_insert_with(|| inst.models.clone());
         }
         let mut part = Part::new(fp_id);
         part.value = inst.value.clone().filter(|v| !v.is_empty());

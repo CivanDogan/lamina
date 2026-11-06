@@ -77,6 +77,17 @@ impl Footprint {
             .or_else(|| self.courtyard_bbox())
     }
 
+    /// Whether the part has a physical body to draw: a model, a height, a
+    /// plated hole or a pasted pad. Mounting holes and fiducials have none.
+    pub fn has_body(&self) -> bool {
+        self.model.is_some()
+            || self.height.is_some()
+            || self
+                .pads
+                .iter()
+                .any(|p| p.paste || matches!(p.kind, PadKind::Through { plated: true, .. }))
+    }
+
     pub fn pads_bbox(&self) -> Option<Rect> {
         let mut out: Option<Rect> = None;
         for p in &self.pads {

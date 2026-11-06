@@ -118,6 +118,18 @@ impl Lamina {
     }
 }
 
+/// Open a project to read it, without the lock, so it works while an agent
+/// or another tool has it open.
+pub fn read_project(path: &str) -> lamina_core::Result<Project> {
+    let dir = PathBuf::from(path);
+    if !model::ProjectData::is_project(&dir) {
+        return Err(model::Error::NotAProject(dir));
+    }
+    let mut p = Project::open_shared(&dir)?;
+    crate::register_checkers(&mut p);
+    Ok(p)
+}
+
 pub fn open_project(
     path: &str,
     create: bool,

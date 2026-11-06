@@ -589,3 +589,52 @@ fn layout_blocks_repeat_save_and_place() {
         .unwrap_err();
     assert!(e.to_string().contains("saved layouts: pair"), "{e}");
 }
+
+#[test]
+fn kicad_board_models_fall_back_and_resolve_project_paths() {
+    let t = tempfile::tempdir().unwrap();
+    let kicad = t.path().join("kicad");
+    std::fs::create_dir_all(kicad.join("models")).unwrap();
+    let corpus = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../lamina-step/corpus/C25804.step");
+    std::fs::copy(&corpus, kicad.join("models/body.step")).unwrap();
+    // A missing library model first, a hidden one, then one in the project.
+    let pcb = r#"(kicad_pcb (version 20240108) (generator "test")
+  (layers (0 "F.Cu" signal) (31 "B.Cu" signal) (44 "Edge.Cuts" user))
+  (gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts") (width 0.1))
+  (footprint "Lib:Part" (layer "F.Cu") (at 10 10)
+    (property "Reference" "J1" (at 0 0) (layer "F.SilkS") (effects (font (size 1 1))))
+    (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu" "F.Paste" "F.Mask"))
+    (model "${KICAD10_3DMODEL_DIR}/Nope.3dshapes/Missing.step")
+    (model "${KIPRJMOD}/models/hidden.step" (hide yes))
+    (model "${KIPRJMOD}/models/body.step" (offset (xyz 0 0 1))))
+  (footprint "Lib:Hole" (layer "F.Cu") (at 3 3)
+    (property "Reference" "H1" (at 0 0) (layer "F.SilkS") (effects (font (size 1 1))))
+    (pad "" np_thru_hole circle (at 0 0) (size 3.2 3.2) (drill 3.2) (layers "*.Cu" "*.Mask"))))
+"#;
+    let file = kicad.join("b.kicad_pcb");
+    std::fs::write(&file, pcb).unwrap();
+    let mut p = Project::create(&t.path().join("board"), "x").unwrap();
+    let r = p
+        .import_kicad_board(ImportKicadBoard {
+            path: file.to_string_lossy().into_owned(),
+            models: true,
+            online: false,
+            replace: false,
+            strict: false,
+        })
+        .unwrap();
+    assert!(
+        r.notes.iter().any(|n| n == "3D models: 1 of 1 resolved"),
+        "{:?}",
+        r.notes
+    );
+    let fp = &p.data.footprints[&p.data.parts.parts["J1"].footprint];
+    let m = fp.model.as_ref().expect("project model used");
+    assert_eq!(m.file, "kicad/models/body.step");
+    assert_eq!(m.offset, [0.0, 0.0, 1.0]);
+    // The mounting hole has no body and is not drawn as a box.
+    let hole = &p.data.footprints[&p.data.parts.parts["H1"].footprint];
+    assert!(!hole.has_body());
+    assert!(fp.has_body());
+}
